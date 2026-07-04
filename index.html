@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BillReturn Sync Live Dashboard</title>
+    <link rel="icon" type="image/png" href="icon.png">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container full-page">
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Header bar with Logo and Controls -->
+            <header class="top-header">
+                <div class="logo-and-title">
+                    <div class="logo-icon">
+                        <img src="icon.png" alt="Logo" class="logo-img">
+                    </div>
+                    <div class="header-title">
+                        <div class="logo-brand">
+                            <h1>BillReturn Sync</h1>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="header-controls">
+                    <!-- Status Indicator -->
+                    <div class="status-pill demo-mode" id="connection-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Demo Mode</span>
+                    </div>
+
+                    <!-- Auto-refresh Info -->
+                    <div class="refresh-info">
+                        <span id="auto-refresh-timer">Refreshed</span>
+                    </div>
+
+                    <!-- Refresh Buttons -->
+                    <button class="icon-btn" id="btn-refresh" title="Reload Sheet Data">
+                        <i data-lucide="refresh-cw"></i>
+                    </button>
+
+                    <!-- Theme Toggle in Header -->
+                    <button class="icon-btn" id="theme-toggle" title="Toggle Light/Dark Mode">
+                        <i data-lucide="sun" class="sun-icon"></i>
+                        <i data-lucide="moon" class="moon-icon"></i>
+                    </button>
+                    
+                    <button class="primary-btn" id="btn-open-settings">
+                        <i data-lucide="sliders"></i>
+                        <span>Configure Sheet</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Database Source Switcher (Invoices vs Returns vs Monthly) -->
+            <div class="db-switcher-container">
+                <button class="db-switch-btn active" id="db-switch-invoices">
+                    <img src="icon-invoice.png" alt="Invoice" class="db-switch-icon"> Invoice Database
+                </button>
+                <button class="db-switch-btn" id="db-switch-returns">
+                    <img src="icon-return.png" alt="Return" class="db-switch-icon"> Return Database
+                </button>
+                <button class="db-switch-btn" id="db-switch-monthly">
+                    <img src="icon-monthly.png" alt="Monthly" class="db-switch-icon"> Monthly Database
+                </button>
+            </div>
+
+            <!-- Dynamic Tab Bar (Renders sheet tabs) -->
+            <div class="tab-navigation-bar" id="tab-nav-container">
+                <!-- Dynamically loaded tabs go here -->
+            </div>
+
+            <!-- Dashboard Analytics & Metrics Section -->
+            <section class="metrics-grid" id="metrics-container">
+                <div class="metric-card">
+                    <div class="metric-icon blue">
+                        <i data-lucide="database"></i>
+                    </div>
+                    <div class="metric-details">
+                        <span class="metric-title" id="metric-title-rows">Total Records</span>
+                        <h3 class="metric-value" id="metric-total-rows">0</h3>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon emerald">
+                        <i data-lucide="shopping-cart"></i>
+                    </div>
+                    <div class="metric-details">
+                        <span class="metric-title" id="metric-title-qty">Total Quantity</span>
+                        <h3 class="metric-value" id="metric-total-qty">0</h3>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon violet">
+                        <i data-lucide="indian-rupee"></i>
+                    </div>
+                    <div class="metric-details">
+                        <span class="metric-title" id="metric-title-sales">Sales Amount</span>
+                        <h3 class="metric-value" id="metric-total-sales">₹0.00</h3>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon rose">
+                        <i data-lucide="shopping-bag"></i>
+                    </div>
+                    <div class="metric-details">
+                        <span class="metric-title" id="metric-title-purchase">Purchase Amount</span>
+                        <h3 class="metric-value" id="metric-total-purchase">₹0.00</h3>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon cyan">
+                        <i data-lucide="trending-up"></i>
+                    </div>
+                    <div class="metric-details">
+                        <span class="metric-title" id="metric-title-profit">Net Margin</span>
+                        <h3 class="metric-value" id="metric-total-profit">₹0.00</h3>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon amber">
+                        <i data-lucide="alert-circle"></i>
+                    </div>
+                    <div class="metric-details">
+                        <span class="metric-title" id="metric-title-disputes">Disputes / Flags</span>
+                        <h3 class="metric-value" id="metric-total-disputes">0</h3>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Main Data Table Container -->
+            <section class="table-container-card">
+                <div class="table-card-header">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="search-input" placeholder="Search tables records...">
+                    </div>
+                    
+                    <div class="header-actions">
+                        <div class="page-size-selector">
+                            <span>Rows per page:</span>
+                            <select id="page-size-select">
+                                <option value="10">10</option>
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                        <button id="btn-export">
+                            <img src="icon-excel.png" alt="Excel" class="btn-icon-excel">
+                            <span>Export CSV</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Live Table Element -->
+                <div class="table-scroll-wrapper" id="table-wrapper">
+                    <table class="data-table" id="main-data-table">
+                        <thead>
+                            <!-- Populated Dynamically -->
+                        </thead>
+                        <tbody>
+                            <!-- Populated Dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Table Loading Overlay -->
+                <div class="table-loader-overlay" id="table-loader">
+                    <div class="spinner-container">
+                        <div class="double-bounce-spinner">
+                            <div class="double-bounce1"></div>
+                            <div class="double-bounce2"></div>
+                        </div>
+                        <p>Syncing with Google Sheets...</p>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div class="table-empty-state hidden" id="table-empty">
+                    <i data-lucide="alert-octagon"></i>
+                    <h3>No Records Found</h3>
+                    <p>Try refining your search query or check if your sheet is empty.</p>
+                </div>
+
+                <!-- Table Footer & Pagination -->
+                <div class="table-card-footer">
+                    <div class="pagination-info">
+                        Showing <span id="pag-start">0</span> to <span id="pag-end">0</span> of <span id="pag-total">0</span> entries
+                    </div>
+                    <div class="pagination-controls" id="pagination-buttons">
+                        <!-- Populated Dynamically -->
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Configure Sheet Modal Backdrop -->
+    <div class="modal-backdrop hidden" id="settings-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i data-lucide="sliders-horizontal"></i>
+                    <h2>Google Sheet Settings</h2>
+                </div>
+                <button class="close-modal-btn" id="btn-close-settings">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            
+            <div class="modal-body">
+                <form id="settings-form">
+                    <!-- Admin Passcode -->
+                    <div class="form-group">
+                        <label for="input-settings-passcode">Admin Passcode</label>
+                        <input type="password" id="input-settings-passcode" placeholder="Enter passcode to unlock editing">
+                        <span class="form-help" id="passcode-feedback">Enter passcode to unlock configuration.</span>
+                    </div>
+
+                    <!-- Secure Config Fields (Hidden until passcode verified) -->
+                    <div id="secure-settings-fields" class="hidden">
+                        <!-- Invoice Sheet URL -->
+                        <div class="form-group">
+                            <label for="input-sheet-url">Invoice Sheet URL or ID</label>
+                            <input type="text" id="input-sheet-url" required disabled placeholder="https://docs.google.com/spreadsheets/d/.../edit...">
+                            <span class="form-help">Copy and paste the full web browser URL of your Google Sheet for Sales/Purchases.</span>
+                        </div>
+
+                        <!-- Return Sheet URL -->
+                        <div class="form-group">
+                            <label for="input-return-sheet-url">Return Sheet URL or ID</label>
+                            <input type="text" id="input-return-sheet-url" required disabled placeholder="https://docs.google.com/spreadsheets/d/.../edit...">
+                            <span class="form-help">Copy and paste the full web browser URL of your Google Sheet for Returns.</span>
+                        </div>
+
+                        <!-- Monthly Sheet URL -->
+                        <div class="form-group">
+                            <label for="input-monthly-sheet-url">Monthly Sheet URL or ID</label>
+                            <input type="text" id="input-monthly-sheet-url" required disabled placeholder="https://docs.google.com/spreadsheets/d/.../edit...">
+                            <span class="form-help">Copy and paste the full web browser URL of your Google Sheet for Monthly Data.</span>
+                        </div>
+
+                        <!-- Auto-detected Tabs info -->
+                        <div class="form-group">
+                            <label for="input-sheet-tabs">Active Sheet Tabs (Auto-detected)</label>
+                            <input type="text" id="input-sheet-tabs" readonly disabled value="Loading tabs automatically..." style="background-color: rgba(255,255,255,0.03); color: var(--text-muted); cursor: not-allowed;">
+                            <span class="form-help">Tabs for the active database are auto-fetched dynamically.</span>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <div></div> <!-- spacing element -->
+                        <div class="footer-action-group">
+                            <button type="button" class="secondary-btn" id="btn-cancel-settings">Cancel</button>
+                            <button type="submit" class="primary-btn" id="btn-save-settings" disabled>Connect & Save</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main JS Application -->
+    <script src="app.js"></script>
+</body>
+</html>
