@@ -262,6 +262,31 @@ function setupEventListeners() {
     // CSV Export button
     document.getElementById('btn-export').addEventListener('click', exportToCSV);
 
+    // Page jump input and button
+    const handlePageJump = () => {
+        const jumpInput = document.getElementById('input-jump-page');
+        if (!jumpInput) return;
+        const pageNum = parseInt(jumpInput.value, 10);
+        const totalRecords = state.filteredData.length;
+        const totalPages = Math.ceil(totalRecords / state.pageSize);
+        
+        if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+            state.currentPage = pageNum;
+            renderTable();
+        } else {
+            jumpInput.value = state.currentPage;
+        }
+    };
+
+    const jumpBtn = document.getElementById('btn-jump-page');
+    const jumpInput = document.getElementById('input-jump-page');
+    if (jumpBtn) jumpBtn.addEventListener('click', handlePageJump);
+    if (jumpInput) {
+        jumpInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') handlePageJump();
+        });
+    }
+
     // Modal backdrop click
     document.getElementById('settings-modal').addEventListener('click', (e) => {
         if (e.target.id === 'settings-modal') closeSettingsModal();
@@ -1167,6 +1192,21 @@ function sortData(colLabel, order, triggerRender = true) {
 function renderPagination(totalPages) {
     const container = document.getElementById('pagination-buttons');
     container.innerHTML = '';
+
+    const jumpContainer = document.getElementById('pagination-jump-container');
+    if (jumpContainer) {
+        if (totalPages <= 1) {
+            jumpContainer.style.display = 'none';
+        } else {
+            jumpContainer.style.display = 'flex';
+            const jumpInput = document.getElementById('input-jump-page');
+            if (jumpInput) {
+                jumpInput.max = totalPages;
+                jumpInput.placeholder = `1-${totalPages}`;
+                jumpInput.value = state.currentPage;
+            }
+        }
+    }
 
     if (totalPages <= 1) return;
 
