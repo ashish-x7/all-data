@@ -480,37 +480,125 @@ a {
     overflow-x: auto;
 }
 
-.tab-btn {
-    background: transparent;
-    border: none;
-    padding: 10px 18px;
-    color: var(--text-muted);
-    font-weight: 500;
-    font-family: var(--font-heading);
+/* ==========================================
+   TAB NAVIGATION SYSTEM (MODERN CONTAINER MARKUP)
+   ========================================== */
+.tab-navigation-bar {
+    display: flex;
+    gap: 16px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+    overflow-x: auto;
+    align-items: center;
+}
+
+.tab-container-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 20px;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
     cursor: pointer;
+    transition: all var(--transition-normal);
     position: relative;
-    white-space: nowrap;
-    transition: color var(--transition-fast);
+    border: 1px solid transparent;
+    background-color: rgba(255, 255, 255, 0.005);
 }
 
-.tab-btn:hover {
-    color: var(--text-title);
+.tab-container-item:hover {
+    background-color: rgba(255, 255, 255, 0.015);
+    border-color: var(--border-color);
 }
 
-.tab-btn.active {
-    color: var(--primary);
-    font-weight: 600;
+.tab-container-item.active {
+    background-color: rgba(99, 102, 241, 0.03);
+    border-color: var(--border-color) var(--border-color) transparent var(--border-color);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
 }
 
-.tab-btn.active::after {
+.tab-container-item.active::after {
     content: '';
     position: absolute;
-    bottom: -2px;
+    bottom: -1px;
     left: 0;
     right: 0;
     height: 2px;
     background-color: var(--primary);
     border-radius: var(--radius-full);
+}
+
+.tab-name-label {
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font-heading);
+    color: var(--text-body);
+    transition: color var(--transition-fast);
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.tab-container-item:hover .tab-name-label {
+    color: var(--text-title);
+}
+
+.tab-container-item.active .tab-name-label {
+    color: var(--primary);
+}
+
+.tab-sub-actions {
+    display: flex;
+    gap: 12px;
+    opacity: 0.5;
+    transition: opacity var(--transition-fast);
+}
+
+.tab-container-item:hover .tab-sub-actions,
+.tab-container-item.active .tab-sub-actions {
+    opacity: 1;
+}
+
+.tab-action-icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.tab-action-icon-btn svg {
+    width: 13px;
+    height: 13px;
+}
+
+.tab-action-icon-btn:hover {
+    background-color: var(--border-color);
+    color: var(--text-title);
+}
+
+/* Sub-action highlights depending on global view mode */
+body.view-mode-data .tab-container-item.active .tab-action-icon-btn.data-btn {
+    color: #10b981; /* Success Color */
+    background-color: rgba(16, 185, 129, 0.12);
+}
+
+body.view-mode-chart .tab-container-item.active .tab-action-icon-btn.chart-btn {
+    color: #6366f1; /* Primary Color */
+    background-color: rgba(99, 102, 241, 0.15);
+}
+
+/* Layout adjustments */
+body.view-mode-data #analytics-section {
+    display: none !important;
+}
+
+body.view-mode-chart .table-container-card {
+    display: none !important;
 }
 
 /* ==========================================
@@ -1270,5 +1358,275 @@ a {
 #btn-export:active .btn-icon-excel {
     filter: brightness(0) invert(1); /* Invert to white when clicked */
 }
+
+/* ==========================================
+   POWERBI ANALYTICS & VISUALIZATIONS SECTION
+   ========================================== */
+.analytics-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    transition: all var(--transition-normal);
+}
+
+.analytics-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    cursor: pointer;
+    background-color: rgba(255, 255, 255, 0.01);
+    border-bottom: 1px solid transparent;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+    user-select: none;
+}
+
+.analytics-header:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+.analytics-card:not(.collapsed) .analytics-header {
+    border-color: var(--border-color);
+}
+
+.analytics-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.analytics-title svg {
+    color: var(--primary);
+    width: 20px;
+    height: 20px;
+}
+
+.analytics-title h2 {
+    font-size: 15px;
+    font-weight: 700;
+    font-family: var(--font-heading);
+    color: var(--text-title);
+    margin: 0;
+}
+
+.toggle-analytics-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    transition: background-color var(--transition-fast);
+}
+
+.toggle-analytics-btn:hover {
+    background-color: var(--table-row-hover);
+    color: var(--text-title);
+}
+
+.analytics-body {
+    padding: 24px;
+    max-height: 1200px;
+    opacity: 1;
+    transition: max-height 0.4s ease, padding 0.4s ease, opacity 0.4s ease;
+}
+
+.analytics-card.collapsed .analytics-body {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.analytics-card.collapsed #analytics-chevron {
+    transform: rotate(180deg);
+}
+
+/* Charts Grid Layout */
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+}
+
+.chart-card {
+    background-color: rgba(255, 255, 255, 0.01);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 290px;
+    min-width: 0; /* Fixes ApexCharts CSS Grid auto-scaling and zoom-in width calculation bug */
+}
+
+.chart-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.chart-card-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-title);
+    margin: 0;
+}
+
+.chart-container {
+    flex-grow: 1;
+    width: 100%;
+    min-width: 0; /* Fixes chart width expansion issues inside flexbox/grid containers */
+    height: 240px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Media Queries for Responsiveness */
+@media (max-width: 991px) {
+    .charts-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+}
+
+/* ==========================================
+   BRAND-SPECIFIC TAB COLOR SCHEMES
+   ========================================== */
+/* Amazon theme colors */
+.tab-container-item[data-brand="amazon"].active {
+    background-color: rgba(255, 153, 0, 0.03);
+    border-color: var(--border-color) var(--border-color) transparent var(--border-color);
+}
+.tab-container-item[data-brand="amazon"].active::after {
+    background-color: #ff9900;
+}
+.tab-container-item[data-brand="amazon"].active .tab-name-label {
+    color: #ff9900;
+}
+body.view-mode-chart .tab-container-item[data-brand="amazon"].active .tab-action-icon-btn.chart-btn {
+    color: #ff9900;
+    background-color: rgba(255, 153, 0, 0.15);
+}
+
+/* AJIO theme colors */
+.tab-container-item[data-brand="ajio"].active {
+    background-color: rgba(216, 27, 96, 0.03);
+    border-color: var(--border-color) var(--border-color) transparent var(--border-color);
+}
+.tab-container-item[data-brand="ajio"].active::after {
+    background-color: #d81b60;
+}
+.tab-container-item[data-brand="ajio"].active .tab-name-label {
+    color: #d81b60;
+}
+body.view-mode-chart .tab-container-item[data-brand="ajio"].active .tab-action-icon-btn.chart-btn {
+    color: #d81b60;
+    background-color: rgba(216, 27, 96, 0.15);
+}
+
+/* Myntra theme colors */
+.tab-container-item[data-brand="myntra"].active {
+    background-color: rgba(255, 63, 108, 0.03);
+    border-color: var(--border-color) var(--border-color) transparent var(--border-color);
+}
+.tab-container-item[data-brand="myntra"].active::after {
+    background-color: #ff3f6c;
+}
+.tab-container-item[data-brand="myntra"].active .tab-name-label {
+    color: #ff3f6c;
+}
+body.view-mode-chart .tab-container-item[data-brand="myntra"].active .tab-action-icon-btn.chart-btn {
+    color: #ff3f6c;
+    background-color: rgba(255, 63, 108, 0.15);
+}
+
+/* Flipkart theme colors */
+.tab-container-item[data-brand="flipkart"].active {
+    background-color: rgba(40, 116, 240, 0.03);
+    border-color: var(--border-color) var(--border-color) transparent var(--border-color);
+}
+.tab-container-item[data-brand="flipkart"].active::after {
+    background-color: #2874f0;
+}
+.tab-container-item[data-brand="flipkart"].active .tab-name-label {
+    color: #2874f0;
+}
+body.view-mode-chart .tab-container-item[data-brand="flipkart"].active .tab-action-icon-btn.chart-btn {
+    color: #2874f0;
+    background-color: rgba(40, 116, 240, 0.15);
+}
+
+/* ==========================================
+   DOUBLE CHART CARD LAYOUT (SALE vs PURCHASE SIDE-BY-SIDE)
+   ========================================== */
+.double-chart-card {
+    grid-column: span 1;
+}
+
+.double-chart-container {
+    display: flex;
+    width: 100%;
+    height: 240px;
+    align-items: stretch;
+    gap: 8px;
+    min-width: 0;
+}
+
+.sub-chart-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+}
+
+.sub-chart-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.sub-chart {
+    width: 100%;
+    flex-grow: 1;
+    min-width: 0;
+    height: calc(100% - 20px);
+}
+
+.chart-divider {
+    width: 1px;
+    background-color: var(--border-color);
+    margin: 8px 0;
+}
+
+/* Responsive adjustment for double charts on mobile */
+@media (max-width: 768px) {
+    .double-chart-container {
+        flex-direction: column;
+        height: auto;
+    }
+    .chart-divider {
+        width: 100%;
+        height: 1px;
+        margin: 12px 0;
+    }
+    .sub-chart {
+        height: 200px;
+    }
+}
+
 
 

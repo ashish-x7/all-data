@@ -11,6 +11,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- ApexCharts CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -132,6 +134,79 @@
                     <div class="metric-details">
                         <span class="metric-title" id="metric-title-disputes">Disputes / Flags</span>
                         <h3 class="metric-value" id="metric-total-disputes">0</h3>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PowerBI-style Analytics Dashboard -->
+            <section class="analytics-card" id="analytics-section">
+                <div class="analytics-header" id="btn-toggle-analytics">
+                    <div class="analytics-title">
+                        <i data-lucide="line-chart"></i>
+                        <h2>Visualizations & Analytics (PowerBI Dashboard)</h2>
+                    </div>
+                    <button class="toggle-analytics-btn">
+                        <i data-lucide="chevron-up" id="analytics-chevron"></i>
+                    </button>
+                </div>
+                <div class="analytics-body" id="analytics-body">
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <div class="chart-card-header">
+                                <h3 id="lbl-chart-trend">Monthly Cashflow Trend</h3>
+                            </div>
+                            <div class="chart-container">
+                                <div id="chart-trend"></div>
+                            </div>
+                        </div>
+                        <div class="chart-card double-chart-card">
+                            <div class="chart-card-header">
+                                <h3 id="lbl-chart-price-dist">Price Distribution (Sale vs Purchase)</h3>
+                            </div>
+                            <div class="double-chart-container" style="display: flex !important; flex-direction: row !important; gap: 16px; width: 100%; height: 240px; align-items: stretch; min-width: 0;">
+                                <div class="sub-chart-wrapper" style="flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0;">
+                                    <span class="sub-chart-title" id="lbl-sub-chart-sale" style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Sale Price</span>
+                                    <div id="chart-sale-distribution" class="sub-chart" style="width: 100%; flex-grow: 1; min-width: 0; height: 220px;"></div>
+                                </div>
+                                <div class="chart-divider" style="width: 1px; background-color: var(--border-color); margin: 8px 0;"></div>
+                                <div class="sub-chart-wrapper" style="flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0;">
+                                    <span class="sub-chart-title" id="lbl-sub-chart-purchase" style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Purchase Price</span>
+                                    <div id="chart-purchase-distribution" class="sub-chart" style="width: 100%; flex-grow: 1; min-width: 0; height: 220px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-card-header">
+                                <h3 id="lbl-chart-hourly">Hourly Processing Traffic</h3>
+                            </div>
+                            <div class="chart-container">
+                                <div id="chart-hourly"></div>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-card-header">
+                                <h3 id="lbl-chart-vendors">Top 5 Vendors</h3>
+                            </div>
+                            <div class="chart-container">
+                                <div id="chart-vendors"></div>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-card-header">
+                                <h3 id="lbl-chart-day-activity">Day of Week Sales Activity</h3>
+                            </div>
+                            <div class="chart-container">
+                                <div id="chart-day-activity"></div>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-card-header" id="chart-share-header">
+                                <h3 id="lbl-chart-share">Invoice Status Breakdown</h3>
+                            </div>
+                            <div class="chart-container">
+                                <div id="chart-share"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </section>

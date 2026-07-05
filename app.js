@@ -4,6 +4,19 @@
  */
 
 // ==========================================
+// APEXCHARTS INSTANCES CACHE
+// ==========================================
+const chartInstances = {
+    trend: null,
+    share: null,
+    hourly: null,
+    vendors: null,
+    saleDist: null,
+    purchaseDist: null,
+    dayActivity: null
+};
+
+// ==========================================
 // APPLICATION STATE
 // ==========================================
 const state = {
@@ -27,6 +40,7 @@ const state = {
     
     tabs: [], // Current active tabs array (pointing to invoiceTabs, returnTabs, or monthlyTabs)
     activeTab: '',
+    viewMode: 'both', // 'both', 'data', or 'chart'
     refreshRate: 300, // in seconds (5 minutes default)
     
     // Core Data
@@ -108,9 +122,45 @@ function init() {
     loadSettings();
     applyTheme();
     setupEventListeners();
+    applyViewMode();
     
     // Initial data load
     fetchData();
+}
+
+/**
+ * Applies the current viewMode (both, data, or chart) to the UI.
+ */
+function applyViewMode() {
+    document.body.classList.remove('view-mode-both', 'view-mode-data', 'view-mode-chart');
+    document.body.classList.add(`view-mode-${state.viewMode}`);
+    
+    const analyticsSection = document.getElementById('analytics-section');
+    const tableSection = document.querySelector('.table-container-card');
+    
+    if (state.viewMode === 'data') {
+        if (analyticsSection) analyticsSection.style.display = 'none';
+        if (tableSection) tableSection.style.display = 'flex';
+    } else if (state.viewMode === 'chart') {
+        if (analyticsSection) {
+            analyticsSection.style.display = 'block';
+            analyticsSection.classList.remove('collapsed'); // expand it
+        }
+        if (tableSection) tableSection.style.display = 'none';
+        
+        setTimeout(() => {
+            window.dispatchEvent(new Event('resize'));
+        }, 100);
+    } else { // both
+        if (analyticsSection) analyticsSection.style.display = 'block';
+        if (tableSection) tableSection.style.display = 'flex';
+        
+        setTimeout(() => {
+            window.dispatchEvent(new Event('resize'));
+        }, 100);
+    }
+    
+    localStorage.setItem('viewMode', state.viewMode);
 }
 
 /**
@@ -122,6 +172,9 @@ function loadSettings() {
     const savedMonthlyUrl = localStorage.getItem('monthlySheetUrl');
     const savedRefresh = localStorage.getItem('refreshRate');
     const savedTheme = localStorage.getItem('theme') || 'dark';
+    const savedViewMode = localStorage.getItem('viewMode') || 'both';
+
+    state.viewMode = savedViewMode;
 
     if (savedUrl) {
         state.sheetUrl = savedUrl;
@@ -287,9 +340,37 @@ function setupEventListeners() {
         });
     }
 
+    // Toggle Visualizations & Analytics Panel
+    const toggleAnalyticsBtn = document.getElementById('btn-toggle-analytics');
+    if (toggleAnalyticsBtn) {
+        toggleAnalyticsBtn.addEventListener('click', () => {
+            const panel = document.getElementById('analytics-section');
+            if (panel) {
+                panel.classList.toggle('collapsed');
+                // Trigger window resize so ApexCharts re-adapts size to container
+                setTimeout(() => {
+                    window.dispatchEvent(new Event('resize'));
+                }, 400);
+            }
+        });
+    }
+
     // Modal backdrop click
     document.getElementById('settings-modal').addEventListener('click', (e) => {
         if (e.target.id === 'settings-modal') closeSettingsModal();
+    });
+
+    // Debounced resize event listener to adapt charts automatically on zoom in/out
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            const analyticsSection = document.getElementById('analytics-section');
+            const isVisible = analyticsSection && analyticsSection.style.display !== 'none';
+            if (isVisible && typeof renderCharts === 'function') {
+                renderCharts();
+            }
+        }, 250);
     });
 }
 
@@ -321,6 +402,8 @@ function applyTheme() {
     if (themeLabel) {
         themeLabel.textContent = isDark ? 'Light Mode' : 'Dark Mode';
     }
+    // Redraw charts with correct colors
+    renderCharts();
 }
 
 // ==========================================
@@ -741,22 +824,91 @@ function formatDate(dateObj) {
  */
 function renderTabs() {
     const container = document.getElementById('tab-nav-container');
+    if (!container) return;
     container.innerHTML = '';
     
     state.tabs.forEach(tabName => {
-        const btn = document.createElement('button');
-        btn.className = `tab-btn ${state.activeTab === tabName ? 'active' : ''}`;
-        btn.textContent = tabName;
+        const item = document.createElement('div');
+        item.className = `tab-container-item ${state.activeTab === tabName ? 'active' : ''}`;
         
-        btn.addEventListener('click', () => {
-            if (state.activeTab !== tabName) {
+        const brandMatch = tabName.toLowerCase().match(/(amazon|ajio|myntra|flipkart)/);
+        if (brandMatch) {
+            item.setAttribute('data-brand', brandMatch[1]);
+        }
+        
+        const label = document.createElement('div');
+        label.className = 'tab-name-label';
+        label.textContent = tabName;
+        item.appendChild(label);
+        
+        const actions = document.createElement('div');
+        actions.className = 'tab-sub-actions';
+        
+        const dataBtn = document.createElement('button');
+        dataBtn.className = `tab-action-icon-btn data-btn ${state.activeTab === tabName && state.viewMode === 'data' ? 'active' : ''}`;
+        dataBtn.title = 'Show Data Only';
+        dataBtn.innerHTML = '<i data-lucide="database"></i>';
+        dataBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tabChanged = state.activeTab !== tabName;
+            const modeChanged = state.viewMode !== 'data';
+            if (tabChanged || modeChanged) {
                 state.activeTab = tabName;
-                fetchData();
+                state.viewMode = 'data';
+                applyViewMode();
+                if (tabChanged) {
+                    fetchData();
+                } else {
+                    renderTabs();
+                }
+            }
+        });
+        actions.appendChild(dataBtn);
+        
+        const chartBtn = document.createElement('button');
+        chartBtn.className = `tab-action-icon-btn chart-btn ${state.activeTab === tabName && state.viewMode === 'chart' ? 'active' : ''}`;
+        chartBtn.title = 'Show Charts Only';
+        chartBtn.innerHTML = '<i data-lucide="bar-chart-2"></i>';
+        chartBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tabChanged = state.activeTab !== tabName;
+            const modeChanged = state.viewMode !== 'chart';
+            if (tabChanged || modeChanged) {
+                state.activeTab = tabName;
+                state.viewMode = 'chart';
+                applyViewMode();
+                if (tabChanged) {
+                    fetchData();
+                } else {
+                    renderTabs();
+                }
+            }
+        });
+        actions.appendChild(chartBtn);
+        
+        item.appendChild(actions);
+        
+        item.addEventListener('click', () => {
+            const tabChanged = state.activeTab !== tabName;
+            const modeChanged = state.viewMode !== 'both';
+            if (tabChanged || modeChanged) {
+                state.activeTab = tabName;
+                state.viewMode = 'both';
+                applyViewMode();
+                if (tabChanged) {
+                    fetchData();
+                } else {
+                    renderTabs();
+                }
             }
         });
         
-        container.appendChild(btn);
+        container.appendChild(item);
     });
+    
+    if (window.lucide) {
+        lucide.createIcons();
+    }
 }
 
 /**
@@ -858,32 +1010,33 @@ function calculateMetrics() {
         let totalDisputes = 0;
 
         const keys = state.rawData.length > 0 ? Object.keys(state.rawData[0]) : [];
-        const qtyCols = keys.filter(k => k.toLowerCase().includes('qty'));
-        const creditAmtCol = keys.find(k => k.toLowerCase().includes('credit note') && k.toLowerCase().includes('amt'));
-        const debitAmtCol = keys.find(k => k.toLowerCase().includes('debit note') && k.toLowerCase().includes('amt'));
-        const singleAmtCol = keys.find(k => k.toLowerCase() === 'amount'); // Amazon returns fallback (AMOUNT column)
-        const remarkCol = keys.find(k => k.toLowerCase() === 'remark' || k.toLowerCase() === 'status' || k.toLowerCase().includes('time & date'));
+        const rCols = findReturnsColumns(keys);
+
+        const creditAmtCol = rCols.creditAmtCol;
+        const debitAmtCol = rCols.debitAmtCol;
+        const creditQtyCol = rCols.creditQtyCol;
+        const debitQtyCol = rCols.debitQtyCol;
+        const remarkCols = keys.filter(k => k.toLowerCase().includes('remark') || k.toLowerCase().includes('status') || k.toLowerCase().includes('user data'));
 
         state.rawData.forEach(row => {
             // 1. Qty calculation
-            if (qtyCols.length > 0) {
-                qtyCols.forEach(col => {
-                    const qVal = parseFloat(row[col].v);
-                    if (!isNaN(qVal)) totalQty += qVal;
-                });
-            } else {
-                // If no Qty column (e.g. Amazon Return), default to 1 return item per row
-                totalQty += 1;
+            let rowQty = 0;
+            if (creditQtyCol) {
+                const val = parseFloat(row[creditQtyCol]?.v);
+                if (!isNaN(val)) rowQty += val;
             }
+            if (debitQtyCol) {
+                const val = parseFloat(row[debitQtyCol]?.v);
+                if (!isNaN(val)) rowQty += val;
+            }
+            // If neither resolved, default to 1 for this row
+            if (rowQty === 0) rowQty = 1;
+            totalQty += rowQty;
 
             // 2. Credit Note Value parsing
             if (creditAmtCol) {
                 const cVal = parseValToNum(row[creditAmtCol].f || row[creditAmtCol].v);
                 if (!isNaN(cVal)) totalCreditAmt += cVal;
-            }
-            if (singleAmtCol) {
-                const sVal = parseValToNum(row[singleAmtCol].f || row[singleAmtCol].v);
-                if (!isNaN(sVal)) totalCreditAmt += sVal;
             }
 
             // 3. Debit Note Value parsing
@@ -893,12 +1046,12 @@ function calculateMetrics() {
             }
 
             // 4. Disputes count
-            if (remarkCol) {
-                const remarkText = String(row[remarkCol].f || row[remarkCol].v || '').toLowerCase();
-                if (remarkText.includes('dispute') || remarkText.includes('flag') || remarkText.includes('hold') || remarkText.includes('reject')) {
+            remarkCols.forEach(col => {
+                const text = String(row[col]?.f || row[col]?.v || '').toLowerCase();
+                if (text.includes('dispute') || text.includes('flag') || text.includes('hold') || text.includes('reject')) {
                     totalDisputes++;
                 }
-            }
+            });
         });
 
         let totalReturnVal = totalCreditAmt + totalDebitAmt;
@@ -977,6 +1130,9 @@ function calculateMetrics() {
         }
         valueDisputes.textContent = formatNumber(totalDisputes);
     }
+    
+    // Render/Update Visualizations
+    renderCharts();
 }
 
 /**
@@ -1534,3 +1690,890 @@ function handleSaveSettings(e) {
 // START THE APP
 // ==========================================
 document.addEventListener('DOMContentLoaded', init);
+
+
+/**
+ * ==========================================
+ * POWERBI-STYLE INTERACTIVE APEXCHARTS ENGINE
+ * ==========================================
+ */
+
+/**
+ * Parses a Date/Month string and formats as "MMM YYYY" for grouping
+ */
+function extractMonthYear(dateStr) {
+    if (!dateStr) return 'Other';
+    dateStr = String(dateStr).trim();
+    
+    // Check for "Mar 2026" or "Apr 2026" formats
+    if (dateStr.match(/^[A-Za-z]{3}\s+\d{4}$/)) {
+        return dateStr;
+    }
+    
+    // Standard Date parsing: DD/MM/YYYY or MM/DD/YYYY
+    const match = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (match) {
+        const day = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10);
+        const year = match[3];
+        
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        let mIdx = month - 1;
+        // Handle swap for safety
+        if (month > 12 && day <= 12) {
+            mIdx = day - 1;
+        }
+        if (mIdx >= 0 && mIdx < 12) {
+            return `${monthNames[mIdx]} ${year}`;
+        }
+    }
+    
+    // Fallback: Check if string has Month Names
+    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    for (let i = 0; i < monthNames.length; i++) {
+        if (dateStr.toLowerCase().includes(monthNames[i])) {
+            const yearMatch = dateStr.match(/\b(20\d{2})\b/);
+            const year = yearMatch ? yearMatch[1] : new Date().getFullYear();
+            const cleanName = monthNames[i].charAt(0).toUpperCase() + monthNames[i].slice(1);
+            return `${cleanName} ${year}`;
+        }
+    }
+    
+    return 'Other';
+}
+
+/**
+ * Parses a Date string and returns the Day of the Week name
+ */
+function extractDayOfWeek(dateStr) {
+    if (!dateStr) return null;
+    dateStr = String(dateStr).trim();
+    
+    // Match DD/MM/YYYY or DD-MM-YYYY format
+    const match = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (match) {
+        let day = parseInt(match[1], 10);
+        let month = parseInt(match[2], 10);
+        const year = parseInt(match[3], 10);
+        
+        // Swap if month and day are reversed
+        if (month > 12 && day <= 12) {
+            const temp = day;
+            day = month;
+            month = temp;
+        }
+        
+        const dObj = new Date(year, month - 1, day);
+        if (!isNaN(dObj.getTime())) {
+            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            return days[dObj.getDay()];
+        }
+    }
+    
+    // Fallback: standard parser
+    const dObj = new Date(dateStr);
+    if (!isNaN(dObj.getTime())) {
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        return days[dObj.getDay()];
+    }
+    
+    return null;
+}
+
+/**
+ * Parses hour from timestamps like "17/04/2026 15:41:53" or "6/1/2026, 12:33:37 PM"
+ */
+function extractHourFromTimestamp(timeStr) {
+    if (!timeStr) return null;
+    timeStr = String(timeStr).trim();
+    
+    // Try matching 12-hour AM/PM format first
+    const ampmMatch = timeStr.match(/(\d{1,2}):\d{2}:\d{2}\s*(AM|PM)/i);
+    if (ampmMatch) {
+        let hour = parseInt(ampmMatch[1], 10);
+        const ampm = ampmMatch[2].toUpperCase();
+        if (ampm === 'PM' && hour < 12) hour += 12;
+        if (ampm === 'AM' && hour === 12) hour = 0;
+        return hour;
+    }
+    
+    // Try matching 24-hour format
+    const timeMatch = timeStr.match(/\b(\d{1,2}):\d{2}:\d{2}\b/);
+    if (timeMatch) {
+        return parseInt(timeMatch[1], 10);
+    }
+    
+    // Fallback search for just the hour pattern hh:mm
+    const simpleMatch = timeStr.match(/(\d{1,2}):\d{2}/);
+    if (simpleMatch) {
+        return parseInt(simpleMatch[1], 10);
+    }
+    
+    return null;
+}
+
+/**
+ * Helper to identify Credit Note and Debit Note specific columns in Returns mode.
+ */
+function findReturnsColumns(keys) {
+    if (!keys || keys.length === 0) return {};
+
+    // 1. Credit Note Amount Column
+    let creditAmtCol = keys.find(k => k.toLowerCase() === 'amount');
+    if (!creditAmtCol) {
+        creditAmtCol = keys.find(k => k.toLowerCase().includes('withtax amt') && !k.includes('(') && !k.includes('_') && !k.includes('2'));
+    }
+    if (!creditAmtCol) {
+        creditAmtCol = keys.find(k => k.toLowerCase().includes('credit note') && k.toLowerCase().includes('amt'));
+    }
+    if (!creditAmtCol) {
+        creditAmtCol = keys.find(k => k.toLowerCase().includes('amt') && !k.includes('(') && !k.includes('_') && !k.includes('2'));
+    }
+
+    // 2. Debit Note Amount Column
+    let debitAmtCol = keys.find(k => k.toLowerCase().includes('debit note') && k.toLowerCase().includes('amt'));
+    if (!debitAmtCol) {
+        debitAmtCol = keys.find(k => k.toLowerCase().includes('withtax amt') && (k.includes('(') || k.includes('_') || k.includes('2') || k.toLowerCase().includes('debit')));
+    }
+    if (!debitAmtCol) {
+        debitAmtCol = keys.filter(k => k.toLowerCase().includes('amt') || k.toLowerCase().includes('amount'))[1];
+    }
+
+    // 3. Credit Note Qty Column
+    let creditQtyCol = keys.find(k => k.toLowerCase() === 'qty');
+    if (!creditQtyCol) {
+        creditQtyCol = keys.find(k => k.toLowerCase().includes('qty') && !k.includes('(') && !k.includes('_') && !k.includes('2'));
+    }
+
+    // 4. Debit Note Qty Column
+    let debitQtyCol = keys.find(k => k.toLowerCase().includes('qty') && (k.includes('(') || k.includes('_') || k.includes('2') || k.toLowerCase().includes('debit')));
+    if (!debitQtyCol) {
+        debitQtyCol = keys.filter(k => k.toLowerCase().includes('qty'))[1];
+    }
+
+    // 5. Credit Note Vendor Column
+    let creditVendorCol = keys.find(k => (k.toLowerCase().includes('vendor') || k.toLowerCase().includes('seller') || k.toLowerCase().includes('neme')) && !k.includes('(') && !k.includes('_') && !k.includes('2'));
+
+    // 6. Debit Note Vendor Column
+    let debitVendorCol = keys.find(k => (k.toLowerCase().includes('vendor') || k.toLowerCase().includes('seller') || k.toLowerCase().includes('neme')) && (k.includes('(') || k.includes('_') || k.includes('2') || k.toLowerCase().includes('debit')));
+    if (!debitVendorCol) {
+        debitVendorCol = keys.filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('seller') || k.toLowerCase().includes('neme'))[1];
+    }
+
+    // 7. Dates
+    let creditDateCol = keys.find(k => k.toLowerCase().includes('credit note date'));
+    if (!creditDateCol) {
+        creditDateCol = keys.find(k => k.toLowerCase().includes('return date') && !k.includes('(') && !k.includes('_') && !k.includes('2'));
+    }
+    if (!creditDateCol) {
+        creditDateCol = keys.find(k => k.toLowerCase().includes('date') && !k.includes('(') && !k.includes('_') && !k.includes('2'));
+    }
+
+    let debitDateCol = keys.find(k => k.toLowerCase().includes('debit note date'));
+    if (!debitDateCol) {
+        debitDateCol = keys.find(k => k.toLowerCase().includes('return date') && (k.includes('(') || k.includes('_') || k.includes('2') || k.toLowerCase().includes('debit')));
+    }
+    if (!debitDateCol) {
+        debitDateCol = keys.filter(k => k.toLowerCase().includes('date'))[1];
+    }
+
+    return {
+        creditAmtCol,
+        debitAmtCol,
+        creditQtyCol,
+        debitQtyCol,
+        creditVendorCol,
+        debitVendorCol,
+        creditDateCol,
+        debitDateCol
+    };
+}
+
+/**
+ * Compact number formatting helper (e.g. 150000 -> 1.5L, 20000000 -> 2Cr)
+ */
+function formatNumberCompact(num) {
+    if (num >= 1e7) return (num / 1e7).toFixed(1).replace(/\.0$/, '') + 'Cr';
+    if (num >= 1e5) return (num / 1e5).toFixed(1).replace(/\.0$/, '') + 'L';
+    if (num >= 1e3) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    return num;
+}
+
+/**
+ * Aggregates dynamic metrics and renders ApexCharts
+ */
+function renderCharts() {
+    // If ApexCharts script is not loaded, exit early
+    if (typeof ApexCharts === 'undefined') {
+        console.warn("ApexCharts is not loaded yet.");
+        return;
+    }
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDark ? '#94a3b8' : '#64748b';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+    const tooltipTheme = isDark ? 'dark' : 'light';
+
+    // Determine active sheet brand color theme
+    const activeTabLower = String(state.activeTab).toLowerCase();
+
+    // Dynamic renaming of card headers based on activeMode (Invoices vs Returns)
+    const isReturns = state.activeMode === 'returns';
+    const isMonthly = state.activeMode === 'monthly';
+
+    const lblTrend = document.getElementById('lbl-chart-trend');
+    const lblPriceDist = document.getElementById('lbl-chart-price-dist');
+    const lblSubSale = document.getElementById('lbl-sub-chart-sale');
+    const lblSubPurchase = document.getElementById('lbl-sub-chart-purchase');
+    const lblHourly = document.getElementById('lbl-chart-hourly');
+    const lblVendors = document.getElementById('lbl-chart-vendors');
+    const lblDayActivity = document.getElementById('lbl-chart-day-activity');
+    const lblShare = document.getElementById('lbl-chart-share');
+
+    if (isReturns) {
+        if (lblTrend) lblTrend.textContent = 'Credit vs Debit Return Trend';
+        if (lblPriceDist) lblPriceDist.textContent = 'Return Value Distribution';
+        if (lblSubSale) lblSubSale.textContent = 'Credit Value';
+        if (lblSubPurchase) lblSubPurchase.textContent = 'Debit Value';
+        if (lblHourly) lblHourly.textContent = 'Hourly Return Traffic';
+        if (lblVendors) lblVendors.textContent = 'Top 5 Returned Vendors';
+        if (lblDayActivity) lblDayActivity.textContent = 'Day of Week Return Activity';
+        if (lblShare) lblShare.textContent = 'Returned Status Breakdown';
+    } else if (isMonthly) {
+        if (lblTrend) lblTrend.textContent = 'Monthly Cashflow Trend';
+        if (lblPriceDist) lblPriceDist.textContent = 'Price Distribution (Sale vs Purchase)';
+        if (lblSubSale) lblSubSale.textContent = 'Sale Price';
+        if (lblSubPurchase) lblSubPurchase.textContent = 'Purchase Price';
+        if (lblHourly) lblHourly.textContent = 'Hourly Processing Traffic';
+        if (lblVendors) lblVendors.textContent = 'Top 5 Vendors';
+        if (lblDayActivity) lblDayActivity.textContent = 'Day of Week Sales Activity';
+        if (lblShare) lblShare.textContent = 'Invoice Status Breakdown';
+    } else {
+        if (lblTrend) lblTrend.textContent = 'Monthly Cashflow Trend';
+        if (lblPriceDist) lblPriceDist.textContent = 'Price Distribution (Sale vs Purchase)';
+        if (lblSubSale) lblSubSale.textContent = 'Sale Price';
+        if (lblSubPurchase) lblSubPurchase.textContent = 'Purchase Price';
+        if (lblHourly) lblHourly.textContent = 'Hourly Processing Traffic';
+        if (lblVendors) lblVendors.textContent = 'Top 5 Vendors';
+        if (lblDayActivity) lblDayActivity.textContent = 'Day of Week Sales Activity';
+        if (lblShare) lblShare.textContent = 'Invoice Status Breakdown';
+    }
+    
+    let brandColors = {
+        primary: '#6366f1', // default indigo
+        secondary: '#f43f5e', // default pink-red
+        accentPalette: ['#6366f1', '#10b981', '#f59e0b', '#3b82f6', '#ec4899'],
+        hourlyLine: '#f59e0b'
+    };
+
+    if (activeTabLower.includes('amazon')) {
+        brandColors = {
+            primary: '#ff9900', // Amazon Orange
+            secondary: '#146eb4', // Amazon Blue
+            accentPalette: ['#ff9900', '#146eb4', '#232f3e', '#388e3c', '#00a8e1'],
+            hourlyLine: '#ff9900'
+        };
+    } else if (activeTabLower.includes('ajio')) {
+        brandColors = {
+            primary: '#d81b60', // AJIO Pink
+            secondary: '#1e40af', // AJIO Navy
+            accentPalette: ['#d81b60', '#1e40af', '#06b6d4', '#f59e0b', '#8b5cf6'],
+            hourlyLine: '#d81b60'
+        };
+    } else if (activeTabLower.includes('myntra')) {
+        brandColors = {
+            primary: '#ff3f6c', // Myntra Pink
+            secondary: '#ffe11b', // Myntra Yellow
+            accentPalette: ['#ff3f6c', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6'],
+            hourlyLine: '#ff3f6c'
+        };
+    } else if (activeTabLower.includes('flipkart')) {
+        brandColors = {
+            primary: '#2874f0', // Flipkart Blue
+            secondary: '#fb641b', // Flipkart Orange
+            accentPalette: ['#2874f0', '#fb641b', '#ffe11b', '#10b981', '#8b5cf6'],
+            hourlyLine: '#2874f0'
+        };
+    }
+
+    const data = state.filteredData;
+    const keys = data.length > 0 ? Object.keys(data[0]) : [];
+
+    const rCols = isReturns ? findReturnsColumns(keys) : {};
+    const creditAmtCol = rCols.creditAmtCol;
+    const debitAmtCol = rCols.debitAmtCol;
+    const creditQtyCol = rCols.creditQtyCol;
+    const debitQtyCol = rCols.debitQtyCol;
+    const creditVendorCol = rCols.creditVendorCol;
+    const debitVendorCol = rCols.debitVendorCol;
+    const creditDateCol = rCols.creditDateCol;
+    const debitDateCol = rCols.debitDateCol;
+
+    // Empty state fallback handling
+    if (data.length === 0) {
+        // Clear existing charts
+        Object.keys(chartInstances).forEach(key => {
+            if (chartInstances[key]) {
+                chartInstances[key].destroy();
+                chartInstances[key] = null;
+            }
+        });
+        return;
+    }
+
+    // ------------------------------------------
+    // 1. Trend Aggregation (Monthly Sales vs Purchase / Credit vs Debit)
+    // ------------------------------------------
+    const trendMap = {};
+    const dateCol = keys.find(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('month'));
+    const saleCols = keys.filter(k => k.toLowerCase().includes('sale') && !k.toLowerCase().includes('zoho'));
+    const purchaseCols = keys.filter(k => k.toLowerCase().includes('purchase') && !k.toLowerCase().includes('zoho'));
+
+    data.forEach(row => {
+        if (state.activeMode === 'returns') {
+            // Credit Note (Sales returns) Monthly aggregation
+            const cDateVal = creditDateCol ? (row[creditDateCol].f || row[creditDateCol].v) : '';
+            const cMonthYear = extractMonthYear(cDateVal);
+            if (cMonthYear !== 'Other') {
+                if (!trendMap[cMonthYear]) trendMap[cMonthYear] = { sales: 0, purchases: 0 };
+                const cVal = parseValToNum(row[creditAmtCol]?.f || row[creditAmtCol]?.v);
+                if (!isNaN(cVal)) trendMap[cMonthYear].sales += cVal;
+            }
+
+            // Debit Note (Purchase returns) Monthly aggregation
+            const dDateVal = debitDateCol ? (row[debitDateCol].f || row[debitDateCol].v) : '';
+            const dMonthYear = extractMonthYear(dDateVal);
+            if (dMonthYear !== 'Other') {
+                if (!trendMap[dMonthYear]) trendMap[dMonthYear] = { sales: 0, purchases: 0 };
+                const dVal = parseValToNum(row[debitAmtCol]?.f || row[debitAmtCol]?.v);
+                if (!isNaN(dVal)) trendMap[dMonthYear].purchases += dVal;
+            }
+        } else {
+            const dateVal = dateCol ? (row[dateCol].f || row[dateCol].v) : '';
+            const monthYear = extractMonthYear(dateVal);
+            
+            if (!trendMap[monthYear]) {
+                trendMap[monthYear] = { sales: 0, purchases: 0 };
+            }
+
+            // Sum Sales
+            saleCols.forEach(col => {
+                const val = parseValToNum(row[col].f || row[col].v);
+                if (!isNaN(val)) trendMap[monthYear].sales += val;
+            });
+
+            // Sum Purchases
+            purchaseCols.forEach(col => {
+                const val = parseValToNum(row[col].f || row[col].v);
+                if (!isNaN(val)) trendMap[monthYear].purchases += val;
+            });
+        }
+    });
+
+    // Sort Month-Years chronologically
+    const sortedMonths = Object.keys(trendMap).sort((a, b) => {
+        if (a === 'Other') return 1;
+        if (b === 'Other') return -1;
+        const parseDate = (str) => {
+            const parts = str.split(' ');
+            const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(parts[0]);
+            return new Date(parts[1] || 2026, m >= 0 ? m : 0, 1);
+        };
+        return parseDate(a) - parseDate(b);
+    });
+
+    const salesSeries = [];
+    const purchaseSeries = [];
+    sortedMonths.forEach(m => {
+        salesSeries.push(Math.round(trendMap[m].sales));
+        purchaseSeries.push(Math.round(trendMap[m].purchases));
+    });
+
+    // ------------------------------------------
+    // 2. Share Aggregation (Donut)
+    // ------------------------------------------
+    const shareLabels = [];
+    const shareValues = [];
+    const shareMap = {};
+
+    if (state.activeMode === 'invoices') {
+        // Group by REMARK/Status
+        const remarkCol = keys.find(k => k.toLowerCase() === 'remark' || k.toLowerCase() === 'status');
+        data.forEach(row => {
+            const label = remarkCol ? String(row[remarkCol].v || 'ALL CLEAR').trim() : 'ALL CLEAR';
+            shareMap[label] = (shareMap[label] || 0) + 1;
+        });
+    } else if (state.activeMode === 'returns') {
+        // Group by Credit Note vs Debit Note values
+        let creditVal = 0;
+        let debitVal = 0;
+        data.forEach(row => {
+            if (creditAmtCol) creditVal += parseValToNum(row[creditAmtCol].f || row[creditAmtCol].v) || 0;
+            if (debitAmtCol) debitVal += parseValToNum(row[debitAmtCol].f || row[debitAmtCol].v) || 0;
+        });
+        if (creditVal > 0 || debitVal > 0) {
+            shareMap['Credit Note'] = Math.round(creditVal);
+            shareMap['Debit Note'] = Math.round(debitVal);
+        } else {
+            shareMap['No Data'] = 0;
+        }
+    } else {
+        // Monthly Consolidated: Split share of marketplace channels
+        let amzSales = 0, ajioSales = 0, mynSales = 0;
+        const amzSaleCols = keys.filter(k => k.toUpperCase().includes('AMAZON') && k.toUpperCase().includes('SALE'));
+        const ajioSaleCols = keys.filter(k => k.toUpperCase().includes('AJIO') && k.toUpperCase().includes('SALE'));
+        const mynSaleCols = keys.filter(k => k.toUpperCase().includes('MYNTRA') && k.toUpperCase().includes('SALE'));
+        data.forEach(row => {
+            amzSaleCols.forEach(col => { amzSales += parseValToNum(row[col].f || row[col].v) || 0; });
+            ajioSaleCols.forEach(col => { ajioSales += parseValToNum(row[col].f || row[col].v) || 0; });
+            mynSaleCols.forEach(col => { mynSales += parseValToNum(row[col].f || row[col].v) || 0; });
+        });
+        shareMap['Amazon'] = Math.round(amzSales);
+        shareMap['Ajio'] = Math.round(ajioSales);
+        shareMap['Myntra'] = Math.round(mynSales);
+    }
+
+    Object.keys(shareMap).forEach(k => {
+        shareLabels.push(k);
+        shareValues.push(shareMap[k]);
+    });
+
+    // ------------------------------------------
+    // 3. Hourly Processing Activity (Line)
+    // ------------------------------------------
+    const hourlyCounts = Array(24).fill(0);
+    const timeCol = keys.find(k => k.toLowerCase().includes('time') || k.toLowerCase().includes('date & time'));
+    
+    data.forEach(row => {
+        const timeVal = timeCol ? (row[timeCol].f || row[timeCol].v) : '';
+        const hour = extractHourFromTimestamp(timeVal);
+        if (hour !== null && hour >= 0 && hour < 24) {
+            hourlyCounts[hour]++;
+        }
+    });
+
+    const hourlyLabels = [
+        '12 AM', '1 AM', '2 AM', '3 AM', '4 AM', '5 AM', '6 AM', '7 AM', '8 AM', '9 AM', '10 AM', '11 AM',
+        '12 PM', '1 PM', '2 PM', '3 PM', '4 PM', '5 PM', '6 PM', '7 PM', '8 PM', '9 PM', '10 PM', '11 PM'
+    ];
+
+    // ------------------------------------------
+    // 4. Top 5 Vendors (Horizontal Bar)
+    // ------------------------------------------
+    const vendorMap = {};
+    const vendorCol = keys.find(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('seller'));
+    
+    data.forEach(row => {
+        if (state.activeMode === 'returns') {
+            if (creditVendorCol) {
+                const cVendor = String(row[creditVendorCol]?.v || 'Other').trim();
+                const cAmt = parseValToNum(row[creditAmtCol]?.f || row[creditAmtCol]?.v) || 0;
+                if (cVendor && cVendor !== 'Other') {
+                    vendorMap[cVendor] = (vendorMap[cVendor] || 0) + cAmt;
+                }
+            }
+            if (debitVendorCol) {
+                const dVendor = String(row[debitVendorCol]?.v || 'Other').trim();
+                const dAmt = parseValToNum(row[debitAmtCol]?.f || row[debitAmtCol]?.v) || 0;
+                if (dVendor && dVendor !== 'Other') {
+                    vendorMap[dVendor] = (vendorMap[dVendor] || 0) + dAmt;
+                }
+            }
+        } else {
+            const vendor = vendorCol ? String(row[vendorCol].v || 'Other').trim() : 'Other';
+            let sales = 0;
+            saleCols.forEach(col => {
+                sales += parseValToNum(row[col].f || row[col].v) || 0;
+            });
+            vendorMap[vendor] = (vendorMap[vendor] || 0) + sales;
+        }
+    });
+
+    const sortedVendors = Object.keys(vendorMap)
+        .map(v => ({ name: v, value: Math.round(vendorMap[v]) }))
+        .sort((a, b) => b.value - a.value)
+        .filter(v => v.name !== '' && v.name !== 'Other')
+        .slice(0, 5);
+
+    const vendorNames = sortedVendors.map(v => v.name);
+    const vendorSales = sortedVendors.map(v => v.value);
+
+    // ==========================================
+    // Render or Update ApexCharts
+    // ==========================================
+
+    // Chart 1: Trend Area Chart
+    const trendOptions = {
+        chart: {
+            type: 'area',
+            height: 240,
+            width: '100%',
+            toolbar: { show: false },
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        theme: { mode: tooltipTheme },
+        stroke: { curve: 'smooth', width: 2 },
+        colors: [brandColors.primary, brandColors.secondary],
+        fill: {
+            type: 'gradient',
+            gradient: {
+                shadeIntensity: 1,
+                opacityFrom: 0.3,
+                opacityTo: 0.02,
+                stops: [0, 90, 100]
+            }
+        },
+        dataLabels: { enabled: false },
+        grid: { borderColor: gridColor },
+        xaxis: {
+            categories: sortedMonths,
+            labels: { style: { colors: textColor, fontSize: '11px' } }
+        },
+        yaxis: {
+            labels: {
+                style: { colors: textColor, fontSize: '11px' },
+                formatter: (v) => '₹' + formatNumberCompact(v)
+            }
+        },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: state.activeMode === 'returns' ? 'Credit Note Amt' : 'Sales Amount', data: salesSeries },
+            { name: state.activeMode === 'returns' ? 'Debit Note Amt' : 'Purchase Amount', data: purchaseSeries }
+        ]
+    };
+
+    renderOrUpdateChart('chart-trend', 'trend', trendOptions);
+
+    // Chart 2: Share Donut Chart
+    const shareOptions = {
+        chart: {
+            type: 'donut',
+            height: 240,
+            width: '100%',
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        theme: { mode: tooltipTheme },
+        colors: brandColors.accentPalette,
+        stroke: { colors: [isDark ? '#1e293b' : '#ffffff'], width: 2 },
+        labels: shareLabels,
+        dataLabels: { enabled: true, formatter: (val) => val.toFixed(1) + "%" },
+        plotOptions: {
+            pie: {
+                donut: {
+                    labels: {
+                        show: true,
+                        name: { show: true, color: textColor },
+                        value: { show: true, color: textColor, formatter: (v) => formatNumber(v) }
+                    }
+                }
+            }
+        },
+        legend: {
+            position: 'bottom',
+            labels: { colors: textColor }
+        },
+        series: shareValues
+    };
+
+    renderOrUpdateChart('chart-share', 'share', shareOptions);
+
+    // Chart 3: Hourly Processing Activity
+    const hourlyOptions = {
+        chart: {
+            type: 'line',
+            height: 240,
+            width: '100%',
+            toolbar: { show: false },
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        theme: { mode: tooltipTheme },
+        stroke: { curve: 'smooth', width: 3 },
+        colors: [brandColors.hourlyLine],
+        grid: { borderColor: gridColor },
+        xaxis: {
+            categories: hourlyLabels,
+            labels: {
+                style: { colors: textColor, fontSize: '9px' },
+                hideOverlappingLabels: true
+            }
+        },
+        yaxis: {
+            labels: { style: { colors: textColor, fontSize: '11px' } }
+        },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: state.activeMode === 'returns' ? 'Returns Processed' : 'Invoices Processed', data: hourlyCounts }]
+    };
+
+    renderOrUpdateChart('chart-hourly', 'hourly', hourlyOptions);
+
+    // Chart 4: Top Vendors Bar Chart
+    const vendorOptions = {
+        chart: {
+            type: 'bar',
+            height: 240,
+            width: '100%',
+            toolbar: { show: false },
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        theme: { mode: tooltipTheme },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                barHeight: '50%',
+                distributed: true,
+                borderRadius: 4
+            }
+        },
+        colors: brandColors.accentPalette,
+        dataLabels: { enabled: false },
+        grid: { borderColor: gridColor },
+        xaxis: {
+            categories: vendorNames,
+            labels: {
+                style: { colors: textColor, fontSize: '11px' },
+                formatter: (v) => '₹' + formatNumberCompact(v)
+            }
+        },
+        yaxis: {
+            labels: { style: { colors: textColor, fontSize: '11px' } }
+        },
+        legend: { show: false },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: state.activeMode === 'returns' ? 'Return Value' : 'Sales Volume', data: vendorSales }]
+    };
+
+    renderOrUpdateChart('chart-vendors', 'vendors', vendorOptions);
+
+    // ------------------------------------------
+    // 5. Sale Price Distribution & Purchase Price Distribution (Pie Charts)
+    // ------------------------------------------
+    const isAmazon = activeTabLower.includes('amazon');
+
+    let saleMap = {};
+    let purchaseMap = {};
+
+    if (isAmazon) {
+        saleMap = { 'Low (< ₹5k)': 0, 'Mid (₹5k - ₹20k)': 0, 'High (> ₹20k)': 0 };
+        purchaseMap = { 'Low (< ₹5k)': 0, 'Mid (₹5k - ₹20k)': 0, 'High (> ₹20k)': 0 };
+    } else {
+        saleMap = { 'Low (< ₹200)': 0, 'Mid-Low (₹200-500)': 0, 'Medium (₹500-700)': 0, 'Mid-High (₹700-900)': 0, 'High (> ₹900)': 0 };
+        purchaseMap = { 'Low (< ₹200)': 0, 'Mid-Low (₹200-500)': 0, 'Medium (₹500-700)': 0, 'Mid-High (₹700-900)': 0, 'High (> ₹900)': 0 };
+    }
+
+    data.forEach(row => {
+        let saleVal = 0;
+        let purchaseVal = 0;
+        let saleQty = 1;
+        let purchaseQty = 1;
+
+        if (state.activeMode === 'returns') {
+            saleVal = parseValToNum(row[creditAmtCol]?.f || row[creditAmtCol]?.v) || 0;
+            purchaseVal = parseValToNum(row[debitAmtCol]?.f || row[debitAmtCol]?.v) || 0;
+
+            saleQty = parseValToNum(row[creditQtyCol] ? (row[creditQtyCol].f || row[creditQtyCol].v) : 1) || 1;
+            purchaseQty = parseValToNum(row[debitQtyCol] ? (row[debitQtyCol].f || row[debitQtyCol].v) : 1) || 1;
+        } else {
+            saleCols.forEach(col => {
+                saleVal += parseValToNum(row[col].f || row[col].v) || 0;
+            });
+            purchaseCols.forEach(col => {
+                purchaseVal += parseValToNum(row[col].f || row[col].v) || 0;
+            });
+            const qty = parseValToNum(row['QTY'] ? (row['QTY'].f || row['QTY'].v) : 1) || 1;
+            saleQty = qty;
+            purchaseQty = qty;
+        }
+
+        // Metric to split (Invoice Size vs Per Qty Price)
+        const saleMetric = isAmazon ? saleVal : (saleVal / saleQty);
+        const purchaseMetric = isAmazon ? purchaseVal : (purchaseVal / purchaseQty);
+
+        // Populate Sale Categories
+        if (isAmazon) {
+            if (saleMetric < 5000) saleMap['Low (< ₹5k)']++;
+            else if (saleMetric <= 20000) saleMap['Mid (₹5k - ₹20k)']++;
+            else saleMap['High (> ₹20k)']++;
+        } else {
+            if (saleMetric < 200) saleMap['Low (< ₹200)']++;
+            else if (saleMetric < 500) saleMap['Mid-Low (₹200-500)']++;
+            else if (saleMetric < 700) saleMap['Medium (₹500-700)']++;
+            else if (saleMetric < 900) saleMap['Mid-High (₹700-900)']++;
+            else saleMap['High (> ₹900)']++;
+        }
+
+        // Populate Purchase Categories
+        if (isAmazon) {
+            if (purchaseMetric < 5000) purchaseMap['Low (< ₹5k)']++;
+            else if (purchaseMetric <= 20000) purchaseMap['Mid (₹5k - ₹20k)']++;
+            else purchaseMap['High (> ₹20k)']++;
+        } else {
+            if (purchaseMetric < 200) purchaseMap['Low (< ₹200)']++;
+            else if (purchaseMetric < 500) purchaseMap['Mid-Low (₹200-500)']++;
+            else if (purchaseMetric < 700) purchaseMap['Medium (₹500-700)']++;
+            else if (purchaseMetric < 900) purchaseMap['Mid-High (₹700-900)']++;
+            else purchaseMap['High (> ₹900)']++;
+        }
+    });
+
+    const saleDistOptions = {
+        chart: {
+            type: 'pie',
+            height: 210,
+            width: '100%',
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        theme: { mode: tooltipTheme },
+        colors: brandColors.accentPalette.slice(0, isAmazon ? 3 : 5),
+        stroke: { colors: [isDark ? '#1e293b' : '#ffffff'], width: 2 },
+        labels: Object.keys(saleMap),
+        dataLabels: { enabled: true, formatter: (val) => val.toFixed(1) + "%" },
+        legend: {
+            position: 'bottom',
+            labels: { colors: textColor }
+        },
+        series: Object.values(saleMap)
+    };
+
+    const purchaseDistOptions = {
+        chart: {
+            type: 'pie',
+            height: 210,
+            width: '100%',
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        theme: { mode: tooltipTheme },
+        colors: brandColors.accentPalette.slice(0, isAmazon ? 3 : 5),
+        stroke: { colors: [isDark ? '#1e293b' : '#ffffff'], width: 2 },
+        labels: Object.keys(purchaseMap),
+        dataLabels: { enabled: true, formatter: (val) => val.toFixed(1) + "%" },
+        legend: {
+            position: 'bottom',
+            labels: { colors: textColor }
+        },
+        series: Object.values(purchaseMap)
+    };
+
+    renderOrUpdateChart('chart-sale-distribution', 'saleDist', saleDistOptions);
+    renderOrUpdateChart('chart-purchase-distribution', 'purchaseDist', purchaseDistOptions);
+
+    // ------------------------------------------
+    // 6. Day of the Week Sales Activity (Column Chart)
+    // ------------------------------------------
+    const daySalesMap = {
+        'Monday': 0,
+        'Tuesday': 0,
+        'Wednesday': 0,
+        'Thursday': 0,
+        'Friday': 0,
+        'Saturday': 0,
+        'Sunday': 0
+    };
+    const dayDebitMap = {
+        'Monday': 0,
+        'Tuesday': 0,
+        'Wednesday': 0,
+        'Thursday': 0,
+        'Friday': 0,
+        'Saturday': 0,
+        'Sunday': 0
+    };
+
+    data.forEach(row => {
+        if (state.activeMode === 'returns') {
+            const cDateVal = creditDateCol ? (row[creditDateCol].f || row[creditDateCol].v) : '';
+            const cDay = extractDayOfWeek(cDateVal);
+            if (cDay && daySalesMap[cDay] !== undefined) {
+                const cVal = parseValToNum(row[creditAmtCol]?.f || row[creditAmtCol]?.v) || 0;
+                daySalesMap[cDay] += cVal;
+            }
+
+            const dDateVal = debitDateCol ? (row[debitDateCol].f || row[debitDateCol].v) : '';
+            const dDay = extractDayOfWeek(dDateVal);
+            if (dDay && dayDebitMap[dDay] !== undefined) {
+                const dVal = parseValToNum(row[debitAmtCol]?.f || row[debitAmtCol]?.v) || 0;
+                dayDebitMap[dDay] += dVal;
+            }
+        } else {
+            const dateVal = dateCol ? (row[dateCol].f || row[dateCol].v) : '';
+            const dayName = extractDayOfWeek(dateVal);
+            if (dayName && daySalesMap[dayName] !== undefined) {
+                let sales = 0;
+                saleCols.forEach(col => {
+                    sales += parseValToNum(row[col].f || row[col].v) || 0;
+                });
+                daySalesMap[dayName] += sales;
+            }
+        }
+    });
+
+    const daySalesSeries = Object.values(daySalesMap).map(v => Math.round(v));
+    const dayDebitSeries = Object.values(dayDebitMap).map(v => Math.round(v));
+    const dayLabels = Object.keys(daySalesMap);
+
+    const seriesData = state.activeMode === 'returns' 
+        ? [
+            { name: 'Credit Note Value', data: daySalesSeries },
+            { name: 'Debit Note Value', data: dayDebitSeries }
+          ]
+        : [{ name: 'Sales Amount', data: daySalesSeries }];
+
+    const dayActivityOptions = {
+        chart: {
+            type: 'bar',
+            height: 240,
+            width: '100%',
+            toolbar: { show: false },
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        theme: { mode: tooltipTheme },
+        plotOptions: {
+            bar: {
+                columnWidth: '55%',
+                borderRadius: 4
+            }
+        },
+        colors: state.activeMode === 'returns' ? [brandColors.primary, brandColors.secondary] : [brandColors.primary],
+        dataLabels: { enabled: false },
+        grid: { borderColor: gridColor },
+        xaxis: {
+            categories: dayLabels,
+            labels: { style: { colors: textColor, fontSize: '11px' } }
+        },
+        yaxis: {
+            labels: {
+                style: { colors: textColor, fontSize: '11px' },
+                formatter: (v) => '₹' + formatNumberCompact(v)
+            }
+        },
+        tooltip: { theme: tooltipTheme },
+        series: seriesData
+    };
+
+    renderOrUpdateChart('chart-day-activity', 'dayActivity', dayActivityOptions);
+}
+
+/**
+ * Creates new ApexCharts instance or recreates it to prevent memory leaks
+ */
+function renderOrUpdateChart(domId, cacheKey, options) {
+    const el = document.getElementById(domId);
+    if (!el) return;
+
+    try {
+        if (chartInstances[cacheKey]) {
+            chartInstances[cacheKey].destroy();
+        }
+        chartInstances[cacheKey] = new ApexCharts(el, options);
+        chartInstances[cacheKey].render();
+    } catch (e) {
+        console.error(`Error rendering chart ${cacheKey}:`, e);
+    }
+}
+
