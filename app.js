@@ -13,7 +13,29 @@ const chartInstances = {
     vendors: null,
     saleDist: null,
     purchaseDist: null,
-    dayActivity: null
+    dayActivity: null,
+    globalTrend: null,
+    globalSalesShare: null,
+    globalReturnsShare: null,
+    globalSalesGrowth: null,
+    globalPurchasesGrowth: null,
+    globalReturnRateTrend: null,
+    globalDisputes: null,
+    globalVendors: null,
+    globalUserLeaderboard: null,
+    globalNetProfit: null,
+    globalPlatformProfitability: null,
+    globalReturnCorrelation: null,
+    globalVendorReturns: null,
+    globalVendorReturnRate: null,
+    globalPlatformDisputeRate: null,
+    globalOperatorDisputeRate: null,
+    globalInvoiceBuckets: null,
+    globalTopDisputedVendors: null,
+    userVolumeShare: null,
+    userPlatformShare: null,
+    userDailyTrend: null,
+    teamDailyTrend: null
 };
 
 // ==========================================
@@ -62,6 +84,14 @@ const state = {
     refreshTimerId: null,
     countdownTimerId: null,
     nextRefreshTime: null
+};
+
+// ==========================================
+// MONTHLY CONSOLIDATED GLOBAL CACHE
+// ==========================================
+const monthlyGlobalCache = {
+    results: null,
+    timestamp: 0
 };
 
 // ==========================================
@@ -122,6 +152,9 @@ function init() {
     loadSettings();
     applyTheme();
     setupEventListeners();
+    if (window.lucide) {
+        lucide.createIcons();
+    }
     applyViewMode();
     
     // Initial data load
@@ -135,8 +168,39 @@ function applyViewMode() {
     document.body.classList.remove('view-mode-both', 'view-mode-data', 'view-mode-chart');
     document.body.classList.add(`view-mode-${state.viewMode}`);
     
+    const globalSection = document.getElementById('global-dashboard-section');
+    const userSection = document.getElementById('user-dashboard-section');
+    const metricsContainer = document.getElementById('metrics-container');
     const analyticsSection = document.getElementById('analytics-section');
     const tableSection = document.querySelector('.table-container-card');
+    const tabNavContainer = document.getElementById('tab-nav-container');
+    
+    if (state.activeMode === 'global') {
+        if (globalSection) globalSection.classList.remove('hidden');
+        if (userSection) userSection.classList.add('hidden');
+        if (metricsContainer) metricsContainer.style.display = 'none';
+        if (analyticsSection) analyticsSection.style.display = 'none';
+        if (tableSection) tableSection.style.display = 'none';
+        if (tabNavContainer) tabNavContainer.style.display = 'none';
+        localStorage.setItem('viewMode', state.viewMode);
+        updateSidebarHighlights();
+        return;
+    } else if (state.activeMode === 'user') {
+        if (globalSection) globalSection.classList.add('hidden');
+        if (userSection) userSection.classList.remove('hidden');
+        if (metricsContainer) metricsContainer.style.display = 'none';
+        if (analyticsSection) analyticsSection.style.display = 'none';
+        if (tableSection) tableSection.style.display = 'none';
+        if (tabNavContainer) tabNavContainer.style.display = 'none';
+        localStorage.setItem('viewMode', state.viewMode);
+        updateSidebarHighlights();
+        return;
+    } else {
+        if (globalSection) globalSection.classList.add('hidden');
+        if (userSection) userSection.classList.add('hidden');
+        if (metricsContainer) metricsContainer.style.display = 'grid';
+        if (tabNavContainer) tabNavContainer.style.display = 'flex';
+    }
     
     if (state.viewMode === 'data') {
         if (analyticsSection) analyticsSection.style.display = 'none';
@@ -161,6 +225,7 @@ function applyViewMode() {
     }
     
     localStorage.setItem('viewMode', state.viewMode);
+    updateSidebarHighlights();
 }
 
 /**
@@ -245,16 +310,93 @@ function setupEventListeners() {
         fetchData();
     });
 
-    // Database Switchers
-    document.getElementById('db-switch-invoices').addEventListener('click', () => {
-        switchDatabaseMode('invoices');
+    // Sidebar Section Accordion Collapsing/Expanding (Auto-expands sidebar if collapsed)
+    document.querySelectorAll('.sidebar-group-header').forEach(header => {
+        header.addEventListener('click', (e) => {
+            const sidebar = document.querySelector('.sidebar');
+            const group = header.closest('.sidebar-group');
+            if (!group) return;
+
+            // If it is a flat single button (like Global Analysis), bypass accordion expanding logic completely
+            if (group.classList.contains('single-btn')) return;
+
+            // If sidebar is collapsed on desktop, clicking any section header will expand the sidebar first!
+            if (sidebar && sidebar.classList.contains('collapsed')) {
+                sidebar.classList.remove('collapsed');
+                // Open the clicked group section
+                document.querySelectorAll('.sidebar-group').forEach(g => {
+                    if (!g.classList.contains('single-btn')) g.classList.remove('open');
+                });
+                group.classList.add('open');
+                return;
+            }
+
+            const isOpen = group.classList.contains('open');
+
+            // Close all groups
+            document.querySelectorAll('.sidebar-group').forEach(g => {
+                if (!g.classList.contains('single-btn')) {
+                    g.classList.remove('open');
+                }
+            });
+
+            // Toggle current
+            if (!isOpen) {
+                group.classList.add('open');
+            }
+        });
     });
-    document.getElementById('db-switch-returns').addEventListener('click', () => {
-        switchDatabaseMode('returns');
+
+    // Sidebar View Buttons Direct Navigation
+    document.querySelectorAll('.sidebar-view-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const mode = btn.getAttribute('data-mode');
+            const view = btn.getAttribute('data-view');
+            const tab = btn.getAttribute('data-tab');
+            navigateDatabaseMode(mode, view, tab);
+        });
     });
-    document.getElementById('db-switch-monthly').addEventListener('click', () => {
-        switchDatabaseMode('monthly');
+
+    // Sidebar Platform Row Click Handler (allows clicking the row/text itself to select and collapse)
+    document.querySelectorAll('.sidebar-platform-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            // If the user clicked one of the view buttons inside the row, let their specific listener handle it
+            if (e.target.closest('.sidebar-view-btn')) return;
+
+            const tab = row.getAttribute('data-tab');
+            const group = row.closest('.sidebar-group');
+            if (group && tab) {
+                const mode = group.getAttribute('data-mode');
+                // Navigate to this tab with the current viewMode (or default to 'data' if not set)
+                navigateDatabaseMode(mode, state.viewMode || 'data', tab);
+            }
+        });
     });
+
+    // Sidebar Global Analysis Flat Button Navigation
+    const sidebarGlobalBtn = document.getElementById('sidebar-global-btn');
+    if (sidebarGlobalBtn) {
+        sidebarGlobalBtn.addEventListener('click', () => {
+            // Close other accordion groups
+            document.querySelectorAll('.sidebar-group').forEach(g => {
+                g.classList.remove('open');
+            });
+            navigateDatabaseMode('global', 'chart', 'GLOBAL DASHBOARD');
+        });
+    }
+
+    // Sidebar User Analysis Flat Button Navigation
+    const sidebarUserBtn = document.getElementById('sidebar-user-btn');
+    if (sidebarUserBtn) {
+        sidebarUserBtn.addEventListener('click', () => {
+            // Close other accordion groups
+            document.querySelectorAll('.sidebar-group').forEach(g => {
+                g.classList.remove('open');
+            });
+            navigateDatabaseMode('user', 'chart', 'USER DASHBOARD');
+        });
+    }
 
     // Modal action controls
     document.getElementById('btn-open-settings').addEventListener('click', openSettingsModal);
@@ -360,6 +502,36 @@ function setupEventListeners() {
         if (e.target.id === 'settings-modal') closeSettingsModal();
     });
 
+    // Global sub-navigation section selectors
+    const subNavBtns = document.querySelectorAll('.sub-nav-btn');
+    subNavBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const targetSection = e.currentTarget.getAttribute('data-section');
+            
+            // Toggle active classes
+            subNavBtns.forEach(b => b.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            
+            // Toggle visibility of section grids
+            const sections = ['financials', 'returns', 'operations'];
+            sections.forEach(sec => {
+                const el = document.getElementById(`global-section-${sec}`);
+                if (el) {
+                    if (sec === targetSection) {
+                        el.classList.remove('hidden');
+                    } else {
+                        el.classList.add('hidden');
+                    }
+                }
+            });
+            
+            // Dispatch resize so ApexCharts compute container widths properly when made visible
+            setTimeout(() => {
+                window.dispatchEvent(new Event('resize'));
+            }, 50);
+        });
+    });
+
     // Debounced resize event listener to adapt charts automatically on zoom in/out
     let resizeTimeout;
     window.addEventListener('resize', () => {
@@ -371,6 +543,32 @@ function setupEventListeners() {
                 renderCharts();
             }
         }, 250);
+    });
+
+    // Toggle Sidebar Menu (Desktop Collapsible & Mobile Slide-Out)
+    const toggleSidebarBtn = document.getElementById('btn-toggle-sidebar');
+    if (toggleSidebarBtn) {
+        toggleSidebarBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sidebar = document.querySelector('.sidebar');
+            if (sidebar) {
+                if (window.innerWidth <= 991) {
+                    sidebar.classList.toggle('mobile-open');
+                } else {
+                    sidebar.classList.toggle('collapsed');
+                }
+            }
+        });
+    }
+
+    // Close mobile sidebar or collapse desktop sidebar if clicked outside (optional, let's keep click outside for mobile only)
+    document.addEventListener('click', (e) => {
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar && window.innerWidth <= 991 && sidebar.classList.contains('mobile-open')) {
+            if (!e.target.closest('.sidebar') && !e.target.closest('#btn-toggle-sidebar')) {
+                sidebar.classList.remove('mobile-open');
+            }
+        }
     });
 }
 
@@ -474,10 +672,13 @@ async function fetchData() {
     } else if (state.activeMode === 'monthly') {
         currentSheetId = state.monthlySheetId;
         currentTabs = state.monthlyTabs;
+    } else if (state.activeMode === 'global' || state.activeMode === 'user') {
+        currentSheetId = state.monthlySheetId;
+        currentTabs = [];
     }
 
     // Auto-detect tab names if empty
-    if (!state.isDemoMode && currentSheetId && currentTabs.length === 0) {
+    if (!state.isDemoMode && currentSheetId && (state.activeMode === 'global' || state.activeMode === 'user' || currentTabs.length === 0)) {
         const fetchedTabs = await fetchTabNames(currentSheetId);
         if (fetchedTabs && fetchedTabs.length > 0) {
             if (state.activeMode === 'invoices') {
@@ -486,11 +687,11 @@ async function fetchData() {
             } else if (state.activeMode === 'returns') {
                 state.returnTabs = fetchedTabs;
                 state.tabs = state.returnTabs;
-            } else {
+            } else if (state.activeMode === 'monthly') {
                 state.monthlyTabs = fetchedTabs;
                 state.tabs = state.monthlyTabs;
             }
-            if (!state.tabs.includes(state.activeTab)) {
+            if (state.activeMode !== 'global' && state.activeMode !== 'user' && !state.tabs.includes(state.activeTab)) {
                 state.activeTab = state.tabs[0];
             }
         } else {
@@ -504,11 +705,13 @@ async function fetchData() {
             } else if (state.activeMode === 'returns') {
                 state.returnTabs = fallbackTabs;
                 state.tabs = state.returnTabs;
-            } else {
+            } else if (state.activeMode === 'monthly') {
                 state.monthlyTabs = fallbackTabs;
                 state.tabs = state.monthlyTabs;
             }
-            state.activeTab = state.tabs[0];
+            if (state.activeMode !== 'global' && state.activeMode !== 'user') {
+                state.activeTab = state.tabs[0];
+            }
         }
     } else {
         // Point tabs state to correct mode tabs cache
@@ -540,6 +743,31 @@ async function fetchData() {
     }
 
     try {
+        if (state.activeMode === 'global' || state.activeMode === 'user') {
+            let rawResults;
+            const now = Date.now();
+            const cacheValidity = 60000; // Cache for 1 minute
+            
+            if (monthlyGlobalCache.results && (now - monthlyGlobalCache.timestamp < cacheValidity)) {
+                rawResults = monthlyGlobalCache.results;
+            } else {
+                rawResults = await fetchGlobalMonthlyData(currentSheetId);
+                monthlyGlobalCache.results = rawResults;
+                monthlyGlobalCache.timestamp = now;
+            }
+            
+            if (state.activeMode === 'global') {
+                parseGlobalMonthlyData(rawResults);
+            } else {
+                parseUserAnalysisData(rawResults);
+            }
+            
+            showLoader(false);
+            updateStatusPill('success');
+            setupAutoRefreshTimer();
+            return;
+        }
+
         const encodedTab = encodeURIComponent(state.activeTab);
         const endpoint = `https://docs.google.com/spreadsheets/d/${currentSheetId}/gviz/tq?tqx=out:json&sheet=${encodedTab}`;
         
@@ -568,36 +796,48 @@ async function fetchData() {
  * Handle Switching Primary Database modes (Invoices vs Returns vs Monthly)
  */
 function switchDatabaseMode(mode) {
-    if (state.activeMode === mode || state.isLoading) return;
+    if (state.isLoading) return;
+    if (state.activeMode === mode && state.viewMode === 'both') return;
 
     state.activeMode = mode;
+    state.viewMode = 'both';
 
+    // Toggle styling active class
     // Toggle styling active class
     const invBtn = document.getElementById('db-switch-invoices');
     const retBtn = document.getElementById('db-switch-returns');
     const monBtn = document.getElementById('db-switch-monthly');
+    const globBtn = document.getElementById('db-switch-global');
 
-    invBtn.classList.remove('active');
-    retBtn.classList.remove('active');
-    monBtn.classList.remove('active');
+    if (invBtn) invBtn.classList.remove('active');
+    if (retBtn) retBtn.classList.remove('active');
+    if (monBtn) monBtn.classList.remove('active');
+    if (globBtn) globBtn.classList.remove('active');
 
     if (mode === 'invoices') {
-        invBtn.classList.add('active');
+        if (invBtn) invBtn.classList.add('active');
         state.tabs = state.invoiceTabs;
     } else if (mode === 'returns') {
-        retBtn.classList.add('active');
+        if (retBtn) retBtn.classList.add('active');
         state.tabs = state.returnTabs;
-    } else {
-        monBtn.classList.add('active');
+    } else if (mode === 'monthly') {
+        if (monBtn) monBtn.classList.add('active');
         state.tabs = state.monthlyTabs;
+    } else if (mode === 'global') {
+        if (globBtn) globBtn.classList.add('active');
+        state.tabs = [];
     }
 
     // Safely default active tab
-    if (state.tabs.length > 0) {
+    if (mode === 'global') {
+        state.activeTab = 'GLOBAL DASHBOARD';
+    } else if (state.tabs.length > 0) {
         state.activeTab = state.tabs[0];
     } else {
         state.activeTab = '';
     }
+
+    applyViewMode();
 
     // Reset list helpers
     state.currentPage = 1;
@@ -609,10 +849,144 @@ function switchDatabaseMode(mode) {
 }
 
 /**
+ * Handle Direct Dropdown Submenu Navigation (Selecting specific Database, ViewMode, and Tab)
+ */
+function navigateDatabaseMode(mode, viewMode, tabName) {
+    if (state.isLoading) return;
+
+    state.activeMode = mode;
+    state.viewMode = mode === 'monthly' ? 'data' : viewMode;
+
+    // Toggle styling active class
+    const invBtn = document.getElementById('db-switch-invoices');
+    const retBtn = document.getElementById('db-switch-returns');
+    const monBtn = document.getElementById('db-switch-monthly');
+    const globBtn = document.getElementById('db-switch-global');
+
+    if (invBtn) invBtn.classList.remove('active');
+    if (retBtn) retBtn.classList.remove('active');
+    if (monBtn) monBtn.classList.remove('active');
+    if (globBtn) globBtn.classList.remove('active');
+
+    if (mode === 'invoices') {
+        if (invBtn) invBtn.classList.add('active');
+        state.tabs = state.invoiceTabs;
+    } else if (mode === 'returns') {
+        if (retBtn) retBtn.classList.add('active');
+        state.tabs = state.returnTabs;
+    } else if (mode === 'monthly') {
+        if (monBtn) monBtn.classList.add('active');
+        state.tabs = state.monthlyTabs;
+    } else if (mode === 'global') {
+        if (globBtn) globBtn.classList.add('active');
+        state.tabs = [];
+    }
+
+    state.activeTab = tabName;
+
+    applyViewMode();
+
+    // Reset list helpers
+    state.currentPage = 1;
+    state.searchQuery = '';
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) searchInput.value = '';
+
+    fetchData();
+
+    // Auto-Close / Auto-Collapse sidebar when navigating
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+        if (window.innerWidth <= 991) {
+            sidebar.classList.remove('mobile-open');
+        } else {
+            sidebar.classList.add('collapsed');
+        }
+    }
+}
+
+/**
+ * Update the active status highlighting for the vertical left sidebar navigation
+ */
+function updateSidebarHighlights() {
+    // Update sidebar-group active and open states
+    document.querySelectorAll('.sidebar-group').forEach(group => {
+        const mode = group.getAttribute('data-mode');
+        if (state.activeMode === mode) {
+            group.classList.add('active');
+            if (!group.classList.contains('single-btn')) {
+                group.classList.add('open');
+            }
+        } else {
+            group.classList.remove('active');
+            if (!group.classList.contains('single-btn')) {
+                group.classList.remove('open');
+            }
+        }
+    });
+
+    // Update platform row active states
+    document.querySelectorAll('.sidebar-platform-row').forEach(row => {
+        const tab = row.getAttribute('data-tab');
+        if (state.activeTab === tab) {
+            row.classList.add('active');
+        } else {
+            row.classList.remove('active');
+        }
+    });
+
+    // Update view-toggle buttons active states
+    document.querySelectorAll('.sidebar-view-btn').forEach(btn => {
+        const mode = btn.getAttribute('data-mode');
+        const view = btn.getAttribute('data-view');
+        const tab = btn.getAttribute('data-tab');
+
+        if (state.activeMode === mode && state.viewMode === view && state.activeTab === tab) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    // Update breadcrumbs header page title
+    const pageTitleEl = document.getElementById('lbl-page-title');
+    if (pageTitleEl) {
+        let titleText = 'Invoices';
+        if (state.activeMode === 'returns') titleText = 'Returns';
+        else if (state.activeMode === 'monthly') titleText = 'Monthly Report';
+        else if (state.activeMode === 'global') titleText = 'Global Analysis';
+        else if (state.activeMode === 'user') titleText = 'User Analysis';
+
+        if (state.activeTab && state.activeTab !== 'GLOBAL DASHBOARD' && state.activeTab !== 'USER DASHBOARD') {
+            // Clean up tab display name (e.g. remove " RETURN" from AMAZON RETURN for clean display)
+            let tabDisplayName = state.activeTab;
+            if (tabDisplayName.includes(' RETURN')) {
+                tabDisplayName = tabDisplayName.replace(' RETURN', '');
+            }
+            titleText += ` ❯ ${tabDisplayName}`;
+        }
+
+        if (state.activeMode !== 'global') {
+            if (state.viewMode === 'data') {
+                titleText += ' (Data View)';
+            } else if (state.viewMode === 'chart') {
+                titleText += ' (Chart View)';
+            }
+        }
+
+        pageTitleEl.textContent = titleText;
+    }
+}
+
+/**
  * Simulates a data fetch using demo database objects.
  */
 function loadDemoData() {
-    const activeDemo = DEMO_DATA[state.activeTab] || DEMO_DATA['Invoices'];
+    let fallbackKey = 'Invoices';
+    if (state.activeMode === 'returns') fallbackKey = 'Returns';
+    if (state.activeMode === 'monthly') fallbackKey = 'Monthly';
+    
+    const activeDemo = DEMO_DATA[state.activeTab] || DEMO_DATA[fallbackKey];
     
     // Parse Columns
     state.columns = activeDemo.cols;
@@ -2575,5 +2949,2350 @@ function renderOrUpdateChart(domId, cacheKey, options) {
     } catch (e) {
         console.error(`Error rendering chart ${cacheKey}:`, e);
     }
+}
+
+// ==========================================
+// GLOBAL CONSOLIDATED DASHBOARD ENGINE
+// ==========================================
+
+/**
+ * Fetches the 4 monthly sheets in parallel
+ */
+async function fetchGlobalMonthlyData(sheetId) {
+    const tabs = ['ALL REPORT', 'MONTHLY DATA', 'ALL RETURN REPORT', 'MONTHLY RETURN DATA'];
+    const promises = tabs.map(async (tab) => {
+        const encodedTab = encodeURIComponent(tab);
+        const endpoint = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet={encodedTab}`;
+        // Correct query endpoint URL
+        const targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodedTab}`;
+        const response = await fetch(targetUrl);
+        if (!response.ok) {
+            throw new Error(`Failed fetching tab ${tab}: ${response.status}`);
+        }
+        const text = await response.text();
+        return { tab, text };
+    });
+    return Promise.all(promises);
+}
+
+/**
+ * Parses raw gviz json responses and invokes consolidation
+ */
+function parseGlobalMonthlyData(results) {
+    let allReport = null;
+    let monthlyData = null;
+    let allReturnReport = null;
+    let monthlyReturnData = null;
+
+    results.forEach(res => {
+        const parsed = parseRawGvizJson(res.text);
+        if (res.tab === 'ALL REPORT') allReport = parsed;
+        if (res.tab === 'MONTHLY DATA') monthlyData = parsed;
+        if (res.tab === 'ALL RETURN REPORT') allReturnReport = parsed;
+        if (res.tab === 'MONTHLY RETURN DATA') monthlyReturnData = parsed;
+    });
+
+    if (!allReport || !monthlyData || !allReturnReport) {
+        console.error("Failed to parse critical sheets for consolidated dashboard.");
+        return;
+    }
+
+    consolidateAndRenderGlobalDashboard(allReport, monthlyData, allReturnReport, monthlyReturnData);
+}
+
+/**
+ * Helper to parse GViz JSON wrapped text
+ */
+function parseRawGvizJson(rawText) {
+    const jsonStart = rawText.indexOf('{');
+    const jsonEnd = rawText.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1) return null;
+    
+    const jsonString = rawText.substring(jsonStart, jsonEnd + 1);
+    const json = JSON.parse(jsonString);
+    return json.table; // returns { cols, rows }
+}
+
+/**
+ * Helper to extract MM YYYY from cell object
+ */
+function extractMonthYearFromCell(cell, opCell) {
+    if (opCell && opCell.v !== null && opCell.v !== undefined) {
+        const valStr = String(opCell.v);
+        const match = valStr.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+        if (match) {
+            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const mm = parseInt(match[2]) - 1;
+            const yyyy = match[3];
+            if (mm >= 0 && mm < 12) {
+                return `${months[mm]} ${yyyy}`;
+            }
+        }
+    }
+    if (!cell || cell.v === null || cell.v === undefined) return null;
+    let val = cell.v;
+    if (typeof val === 'string' && val.startsWith('Date(')) {
+        val = parseGoogleDateString(val);
+    }
+    if (val instanceof Date) {
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return `${months[val.getMonth()]} ${val.getFullYear()}`;
+    }
+    return extractMonthYear(cell.f || cell.v);
+}
+
+/**
+ * Helper to parse operator name from timestamp strings
+ */
+function extractOperator(timeStr) {
+    if (!timeStr) return null;
+    let match = timeStr.match(/\(([^)]+)\)/);
+    if (match) return match[1].trim().toUpperCase();
+    match = timeStr.match(/-\s*"?([A-Z\s]+)"?/i);
+    if (match) return match[1].trim().toUpperCase();
+    return null;
+}
+
+/**
+ * Index-based row cell parser for multi-platform side-by-side columns
+ */
+function extractPlatformTx(row, offset, isAmazon, isAjio, isMyntra, isFlipkart) {
+    const saleCell = row.c[offset + 6];
+    const purchaseCell = row.c[offset + 13];
+    
+    let vendorIdx = offset + 17;
+    
+    const vendorCell = row.c[vendorIdx];
+    const statusCell = row.c[offset + 16];
+    const timeCell = row.c[offset + 15];
+    
+    return {
+        sale: saleCell ? parseValToNum(saleCell.v) : 0,
+        purchase: purchaseCell ? parseValToNum(purchaseCell.v) : 0,
+        vendor: vendorCell ? String(vendorCell.v || '').trim() : '',
+        status: statusCell ? String(statusCell.v || '').trim() : '',
+        time: timeCell ? String(timeCell.v || '').trim() : ''
+    };
+}
+
+// Global reference holder to avoid closure leaks on re-renders
+let currentDashboardData = null;
+
+/**
+ * Consolidated dashboard logic and event binding
+ */
+function consolidateAndRenderGlobalDashboard(allReport, monthlyData, allReturnReport, monthlyReturnData) {
+    currentDashboardData = { allReport, monthlyData, allReturnReport, monthlyReturnData };
+    
+    // 1. Collect unique month names
+    const monthKeys = new Set();
+    allReport.rows.forEach(row => {
+        if (!row || !row.c) return;
+        [0, 8, 16, 24].forEach(idx => {
+            const m = extractMonthYearFromCell(row.c[idx]);
+            if (m) monthKeys.add(m);
+        });
+    });
+    
+    const sortedMonths = Array.from(monthKeys).sort((a, b) => {
+        const parseDate = (str) => {
+            const parts = str.split(' ');
+            const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(parts[0]);
+            return new Date(parts[1] || 2026, m >= 0 ? m : 0, 1);
+        };
+        return parseDate(a) - parseDate(b);
+    });
+    
+    // 2. Populate Dropdown Month Filter
+    const filterSelect = document.getElementById('global-month-filter');
+    if (filterSelect) {
+        filterSelect.innerHTML = '<option value="ALL">All Months</option>';
+        sortedMonths.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            filterSelect.appendChild(opt);
+        });
+        
+        // Replace with clean clone to detach previous event listeners
+        const newSelect = filterSelect.cloneNode(true);
+        filterSelect.parentNode.replaceChild(newSelect, filterSelect);
+        
+        newSelect.addEventListener('change', (e) => {
+            renderFilteredDashboard(e.target.value, sortedMonths);
+        });
+    }
+    
+    // 3. Render initial dashboard
+    renderFilteredDashboard('ALL', sortedMonths);
+}
+
+/**
+ * Filters values and renders/updates KPIs and 9 charts
+ */
+function renderFilteredDashboard(selectedMonth, sortedMonths) {
+    if (!currentDashboardData) return;
+    
+    const { allReport, monthlyData, allReturnReport, monthlyReturnData } = currentDashboardData;
+    
+    let totalSales = 0;
+    let totalPurchases = 0;
+    let totalReturns = 0;
+    let totalDisputes = 0;
+    
+    // Helper to calculate metrics for a specific month for MoM badges
+    function getMonthlySummary(monthName) {
+        let sales = 0, purchases = 0, returns = 0, disputes = 0;
+        
+        allReport.rows.forEach(row => {
+            if (!row || !row.c) return;
+            // Amazon
+            if (extractMonthYearFromCell(row.c[0]) === monthName) {
+                sales += parseValToNum(row.c[1]?.v);
+                purchases += parseValToNum(row.c[3]?.v);
+                disputes += parseValToNum(row.c[6]?.v);
+            }
+            // Ajio
+            if (extractMonthYearFromCell(row.c[8]) === monthName) {
+                sales += parseValToNum(row.c[9]?.v);
+                purchases += parseValToNum(row.c[11]?.v);
+                disputes += parseValToNum(row.c[14]?.v);
+            }
+            // Myntra
+            if (extractMonthYearFromCell(row.c[16]) === monthName) {
+                sales += parseValToNum(row.c[17]?.v);
+                purchases += parseValToNum(row.c[19]?.v);
+                disputes += parseValToNum(row.c[22]?.v);
+            }
+            // Flipkart
+            if (extractMonthYearFromCell(row.c[24]) === monthName) {
+                sales += parseValToNum(row.c[25]?.v);
+                purchases += parseValToNum(row.c[27]?.v);
+                disputes += parseValToNum(row.c[30]?.v);
+            }
+        });
+        
+        allReturnReport.rows.forEach(row => {
+            if (!row || !row.c) return;
+            if (extractMonthYearFromCell(row.c[0]) === monthName) {
+                returns += parseValToNum(row.c[2]?.v) + parseValToNum(row.c[4]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[8]) === monthName) {
+                returns += parseValToNum(row.c[10]?.v) + parseValToNum(row.c[12]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[16]) === monthName) {
+                returns += parseValToNum(row.c[18]?.v) + parseValToNum(row.c[20]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[24]) === monthName) {
+                returns += parseValToNum(row.c[26]?.v) + parseValToNum(row.c[28]?.v);
+            }
+        });
+        
+        return {
+            sales,
+            purchases,
+            returns,
+            disputes,
+            margin: sales - purchases,
+            revenue: sales - returns
+        };
+    }
+
+    // MoM growth calculations
+    let currMetrics = null;
+    let prevMetrics = null;
+    
+    if (selectedMonth === 'ALL') {
+        if (sortedMonths.length >= 1) {
+            currMetrics = getMonthlySummary(sortedMonths[sortedMonths.length - 1]);
+        }
+        if (sortedMonths.length >= 2) {
+            prevMetrics = getMonthlySummary(sortedMonths[sortedMonths.length - 2]);
+        }
+    } else {
+        currMetrics = getMonthlySummary(selectedMonth);
+        const idx = sortedMonths.indexOf(selectedMonth);
+        if (idx > 0) {
+            prevMetrics = getMonthlySummary(sortedMonths[idx - 1]);
+        }
+    }
+
+    function renderGrowthBadge(elementId, currVal, prevVal, isLowerBetter = false) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        
+        if (prevVal === null || prevVal === undefined || prevVal === 0) {
+            el.className = 'kpi-badge badge-neutral';
+            el.innerHTML = '<span style="font-size:10px;">no baseline</span>';
+            return;
+        }
+        
+        const diff = currVal - prevVal;
+        const pct = ((diff / prevVal) * 100).toFixed(1);
+        const isPositive = diff >= 0;
+        
+        let badgeClass = 'badge-neutral';
+        let arrow = '●';
+        
+        if (diff !== 0) {
+            if (isLowerBetter) {
+                badgeClass = isPositive ? 'badge-down' : 'badge-up';
+                arrow = isPositive ? '▼' : '▲';
+            } else {
+                badgeClass = isPositive ? 'badge-up' : 'badge-down';
+                arrow = isPositive ? '▲' : '▼';
+            }
+        }
+        
+        const prefix = diff > 0 ? '+' : '';
+        el.className = `kpi-badge ${badgeClass}`;
+        el.innerHTML = `<span>${arrow}</span> ${prefix}${pct}% vs last month`;
+    }
+
+    if (currMetrics) {
+        const pm = prevMetrics || {};
+        renderGrowthBadge('global-kpi-sales-badge', currMetrics.sales, pm.sales, false);
+        renderGrowthBadge('global-kpi-purchases-badge', currMetrics.purchases, pm.purchases, false);
+        renderGrowthBadge('global-kpi-margin-badge', currMetrics.margin, pm.margin, false);
+        renderGrowthBadge('global-kpi-returns-badge', currMetrics.returns, pm.returns, true);
+        renderGrowthBadge('global-kpi-revenue-badge', currMetrics.revenue, pm.revenue, false);
+        renderGrowthBadge('global-kpi-disputes-badge', currMetrics.disputes, pm.disputes, true);
+    } else {
+        ['sales', 'purchases', 'margin', 'returns', 'revenue', 'disputes'].forEach(k => {
+            const el = document.getElementById(`global-kpi-${k}-badge`);
+            if (el) el.innerHTML = '';
+        });
+    }
+    
+    // KPI Calculations from Summaries (ALL REPORT)
+    allReport.rows.forEach(row => {
+        if (!row || !row.c) return;
+        
+        // Amazon (Offset 0)
+        const amzM = extractMonthYearFromCell(row.c[0]);
+        if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
+            totalSales += parseValToNum(row.c[1]?.v);
+            totalPurchases += parseValToNum(row.c[3]?.v);
+            totalDisputes += parseValToNum(row.c[6]?.v);
+        }
+        // Ajio (Offset 8)
+        const ajioM = extractMonthYearFromCell(row.c[8]);
+        if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
+            totalSales += parseValToNum(row.c[9]?.v);
+            totalPurchases += parseValToNum(row.c[11]?.v);
+            totalDisputes += parseValToNum(row.c[14]?.v);
+        }
+        // Myntra (Offset 16)
+        const mynM = extractMonthYearFromCell(row.c[16]);
+        if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
+            totalSales += parseValToNum(row.c[17]?.v);
+            totalPurchases += parseValToNum(row.c[19]?.v);
+            totalDisputes += parseValToNum(row.c[22]?.v);
+        }
+        // Flipkart (Offset 24)
+        const fkM = extractMonthYearFromCell(row.c[24]);
+        if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
+            totalSales += parseValToNum(row.c[25]?.v);
+            totalPurchases += parseValToNum(row.c[27]?.v);
+            totalDisputes += parseValToNum(row.c[30]?.v);
+        }
+    });
+    
+    // KPI Returns from Summaries (ALL RETURN REPORT)
+    allReturnReport.rows.forEach(row => {
+        if (!row || !row.c) return;
+        
+        // Amazon
+        const amzM = extractMonthYearFromCell(row.c[0]);
+        if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
+            totalReturns += parseValToNum(row.c[2]?.v) + parseValToNum(row.c[4]?.v);
+        }
+        // Ajio
+        const ajioM = extractMonthYearFromCell(row.c[8]);
+        if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
+            totalReturns += parseValToNum(row.c[10]?.v) + parseValToNum(row.c[12]?.v);
+        }
+        // Myntra
+        const mynM = extractMonthYearFromCell(row.c[16]);
+        if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
+            totalReturns += parseValToNum(row.c[18]?.v) + parseValToNum(row.c[20]?.v);
+        }
+        // Flipkart
+        const fkM = extractMonthYearFromCell(row.c[24]);
+        if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
+            totalReturns += parseValToNum(row.c[26]?.v) + parseValToNum(row.c[28]?.v);
+        }
+    });
+    
+    let netMargin = totalSales - totalPurchases;
+    let netRevenue = totalSales - totalReturns;
+    
+    // Injects Values to DOM Elements
+    document.getElementById('global-kpi-sales').textContent = '₹ ' + formatCurrency(totalSales);
+    document.getElementById('global-kpi-purchases').textContent = '₹ ' + formatCurrency(totalPurchases);
+    
+    const marginEl = document.getElementById('global-kpi-margin');
+    marginEl.textContent = '₹ ' + formatCurrency(netMargin);
+    marginEl.style.color = netMargin < 0 ? '#ef4444' : '#10b981';
+    
+    document.getElementById('global-kpi-returns').textContent = '₹ ' + formatCurrency(totalReturns);
+    document.getElementById('global-kpi-revenue').textContent = '₹ ' + formatCurrency(netRevenue);
+    document.getElementById('global-kpi-disputes').textContent = formatNumber(totalDisputes);
+
+    // ==========================================
+    // AGGREGATIONS FOR CHARTS
+    // ==========================================
+
+    // A. Historical Charts Datasets (Chronological full trend over all months)
+    const salesTrend = [];
+    const purchaseTrend = [];
+    const returnsTrend = [];
+    
+    const amzSalesTrend = [];
+    const ajioSalesTrend = [];
+    const mynSalesTrend = [];
+    const fkSalesTrend = [];
+    
+    const amzPurchaseTrend = [];
+    const ajioPurchaseTrend = [];
+    const mynPurchaseTrend = [];
+    const fkPurchaseTrend = [];
+    
+    const amzReturnRateTrend = [];
+    const ajioReturnRateTrend = [];
+    const mynReturnRateTrend = [];
+    const fkReturnRateTrend = [];
+    
+    sortedMonths.forEach(m => {
+        let amzS = 0, ajioS = 0, mynS = 0, fkS = 0;
+        let amzP = 0, ajioP = 0, mynP = 0, fkP = 0;
+        let amzR = 0, ajioR = 0, mynR = 0, fkR = 0;
+        
+        allReport.rows.forEach(row => {
+            if (!row || !row.c) return;
+            if (extractMonthYearFromCell(row.c[0]) === m) {
+                amzS += parseValToNum(row.c[1]?.v);
+                amzP += parseValToNum(row.c[3]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[8]) === m) {
+                ajioS += parseValToNum(row.c[9]?.v);
+                ajioP += parseValToNum(row.c[11]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[16]) === m) {
+                mynS += parseValToNum(row.c[17]?.v);
+                mynP += parseValToNum(row.c[19]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[24]) === m) {
+                fkS += parseValToNum(row.c[25]?.v);
+                fkP += parseValToNum(row.c[27]?.v);
+            }
+        });
+        
+        allReturnReport.rows.forEach(row => {
+            if (!row || !row.c) return;
+            if (extractMonthYearFromCell(row.c[0]) === m) {
+                amzR += parseValToNum(row.c[2]?.v) + parseValToNum(row.c[4]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[8]) === m) {
+                ajioR += parseValToNum(row.c[10]?.v) + parseValToNum(row.c[12]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[16]) === m) {
+                mynR += parseValToNum(row.c[18]?.v) + parseValToNum(row.c[20]?.v);
+            }
+            if (extractMonthYearFromCell(row.c[24]) === m) {
+                fkR += parseValToNum(row.c[26]?.v) + parseValToNum(row.c[28]?.v);
+            }
+        });
+        
+        // Sum combined
+        salesTrend.push(Math.round(amzS + ajioS + mynS + fkS));
+        purchaseTrend.push(Math.round(amzP + ajioP + mynP + fkP));
+        returnsTrend.push(Math.round(amzR + ajioR + mynR + fkR));
+        
+        // Individual sales
+        amzSalesTrend.push(Math.round(amzS));
+        ajioSalesTrend.push(Math.round(ajioS));
+        mynSalesTrend.push(Math.round(mynS));
+        fkSalesTrend.push(Math.round(fkS));
+        
+        // Individual purchase
+        amzPurchaseTrend.push(Math.round(amzP));
+        ajioPurchaseTrend.push(Math.round(ajioP));
+        mynPurchaseTrend.push(Math.round(mynP));
+        fkPurchaseTrend.push(Math.round(fkP));
+        
+        // Return rates
+        amzReturnRateTrend.push(amzS > 0 ? parseFloat(((amzR / amzS) * 100).toFixed(2)) : 0);
+        ajioReturnRateTrend.push(ajioS > 0 ? parseFloat(((ajioR / ajioS) * 100).toFixed(2)) : 0);
+        mynReturnRateTrend.push(mynS > 0 ? parseFloat(((mynR / mynS) * 100).toFixed(2)) : 0);
+        fkReturnRateTrend.push(fkS > 0 ? parseFloat(((fkR / fkS) * 100).toFixed(2)) : 0);
+    });
+
+    const netProfitTrend = salesTrend.map((sale, i) => Math.round(sale - purchaseTrend[i]));
+
+    // B. Filtered Datasets (React to Selected Month Filter)
+    let amzSalesSel = 0, ajioSalesSel = 0, mynSalesSel = 0, fkSalesSel = 0;
+    let amzPurchasesSel = 0, ajioPurchasesSel = 0, mynPurchasesSel = 0, fkPurchasesSel = 0;
+    let amzReturnsSel = 0, ajioReturnsSel = 0, mynReturnsSel = 0, fkReturnsSel = 0;
+    
+    allReport.rows.forEach(row => {
+        if (!row || !row.c) return;
+        const amzM = extractMonthYearFromCell(row.c[0]);
+        if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
+            amzSalesSel += parseValToNum(row.c[1]?.v);
+            amzPurchasesSel += parseValToNum(row.c[3]?.v);
+        }
+        const ajioM = extractMonthYearFromCell(row.c[8]);
+        if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
+            ajioSalesSel += parseValToNum(row.c[9]?.v);
+            ajioPurchasesSel += parseValToNum(row.c[11]?.v);
+        }
+        const mynM = extractMonthYearFromCell(row.c[16]);
+        if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
+            mynSalesSel += parseValToNum(row.c[17]?.v);
+            mynPurchasesSel += parseValToNum(row.c[19]?.v);
+        }
+        const fkM = extractMonthYearFromCell(row.c[24]);
+        if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
+            fkSalesSel += parseValToNum(row.c[25]?.v);
+            fkPurchasesSel += parseValToNum(row.c[27]?.v);
+        }
+    });
+    
+    allReturnReport.rows.forEach(row => {
+        if (!row || !row.c) return;
+        const amzM = extractMonthYearFromCell(row.c[0]);
+        if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
+            amzReturnsSel += parseValToNum(row.c[2]?.v) + parseValToNum(row.c[4]?.v);
+        }
+        const ajioM = extractMonthYearFromCell(row.c[8]);
+        if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
+            ajioReturnsSel += parseValToNum(row.c[10]?.v) + parseValToNum(row.c[12]?.v);
+        }
+        const mynM = extractMonthYearFromCell(row.c[16]);
+        if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
+            mynReturnsSel += parseValToNum(row.c[18]?.v) + parseValToNum(row.c[20]?.v);
+        }
+        const fkM = extractMonthYearFromCell(row.c[24]);
+        if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
+            fkReturnsSel += parseValToNum(row.c[26]?.v) + parseValToNum(row.c[28]?.v);
+        }
+    });
+
+    // Return Quantities (for correlation chart)
+    let amzReturnQty = 0, ajioReturnQty = 0, mynReturnQty = 0, fkReturnQty = 0;
+    
+    if (monthlyReturnData && monthlyReturnData.rows) {
+        monthlyReturnData.rows.forEach(row => {
+            if (!row || !row.c) return;
+            
+            // Amazon CN
+            const amzCnM = extractMonthYearFromCell(row.c[0], row.c[9]);
+            if (amzCnM && (selectedMonth === 'ALL' || amzCnM === selectedMonth)) {
+                amzReturnQty += parseValToNum(row.c[6]?.v);
+            }
+            // Amazon DN
+            const amzDnM = extractMonthYearFromCell(row.c[13], row.c[22]);
+            if (amzDnM && (selectedMonth === 'ALL' || amzDnM === selectedMonth)) {
+                amzReturnQty += parseValToNum(row.c[19]?.v);
+            }
+            
+            // Ajio CN
+            const ajioCnM = extractMonthYearFromCell(row.c[26], row.c[35]);
+            if (ajioCnM && (selectedMonth === 'ALL' || ajioCnM === selectedMonth)) {
+                ajioReturnQty += parseValToNum(row.c[32]?.v);
+            }
+            // Ajio DN
+            const ajioDnM = extractMonthYearFromCell(row.c[39], row.c[48]);
+            if (ajioDnM && (selectedMonth === 'ALL' || ajioDnM === selectedMonth)) {
+                ajioReturnQty += parseValToNum(row.c[45]?.v);
+            }
+            
+            // Myntra CN
+            const mynCnM = extractMonthYearFromCell(row.c[52], row.c[61]);
+            if (mynCnM && (selectedMonth === 'ALL' || mynCnM === selectedMonth)) {
+                mynReturnQty += parseValToNum(row.c[58]?.v);
+            }
+            // Myntra DN
+            const mynDnM = extractMonthYearFromCell(row.c[55], row.c[74]);
+            if (mynDnM && (selectedMonth === 'ALL' || mynDnM === selectedMonth)) {
+                mynReturnQty += parseValToNum(row.c[71]?.v);
+            }
+            
+            // Flipkart CN
+            const fkCnM = extractMonthYearFromCell(row.c[78], row.c[87]);
+            if (fkCnM && (selectedMonth === 'ALL' || fkCnM === selectedMonth)) {
+                fkReturnQty += parseValToNum(row.c[84]?.v);
+            }
+            // Flipkart DN
+            const fkDnM = extractMonthYearFromCell(row.c[91], row.c[100]);
+            if (fkDnM && (selectedMonth === 'ALL' || fkDnM === selectedMonth)) {
+                fkReturnQty += parseValToNum(row.c[97]?.v);
+            }
+        });
+    }
+
+    // Vendor Returns Contribution (Amount & Qty)
+    const vendorReturnsAmt = {};
+    const vendorReturnQty = {};
+    const vendorSalesQty = {};
+    
+    if (monthlyReturnData && monthlyReturnData.rows) {
+        monthlyReturnData.rows.forEach(row => {
+            if (!row || !row.c) return;
+            
+            // Amazon CN
+            const amzCnM = extractMonthYearFromCell(row.c[0], row.c[9]);
+            if (amzCnM && (selectedMonth === 'ALL' || amzCnM === selectedMonth)) {
+                const sCN = row.c[8] ? String(row.c[8].v || '').trim() : '';
+                if (sCN && sCN !== 'Other') {
+                    vendorReturnsAmt[sCN] = (vendorReturnsAmt[sCN] || 0) + parseValToNum(row.c[7]?.v);
+                    vendorReturnQty[sCN] = (vendorReturnQty[sCN] || 0) + parseValToNum(row.c[6]?.v);
+                }
+            }
+            // Amazon DN
+            const amzDnM = extractMonthYearFromCell(row.c[13], row.c[22]);
+            if (amzDnM && (selectedMonth === 'ALL' || amzDnM === selectedMonth)) {
+                const sDN = row.c[21] ? String(row.c[21].v || '').trim() : '';
+                if (sDN && sDN !== 'Other') {
+                    vendorReturnsAmt[sDN] = (vendorReturnsAmt[sDN] || 0) + parseValToNum(row.c[20]?.v);
+                    vendorReturnQty[sDN] = (vendorReturnQty[sDN] || 0) + parseValToNum(row.c[19]?.v);
+                }
+            }
+            
+            // Ajio CN
+            const ajioCnM = extractMonthYearFromCell(row.c[26], row.c[35]);
+            if (ajioCnM && (selectedMonth === 'ALL' || ajioCnM === selectedMonth)) {
+                const sCN = row.c[34] ? String(row.c[34].v || '').trim() : '';
+                if (sCN && sCN !== 'Other') {
+                    vendorReturnsAmt[sCN] = (vendorReturnsAmt[sCN] || 0) + parseValToNum(row.c[33]?.v);
+                    vendorReturnQty[sCN] = (vendorReturnQty[sCN] || 0) + parseValToNum(row.c[32]?.v);
+                }
+            }
+            // Ajio DN
+            const ajioDnM = extractMonthYearFromCell(row.c[39], row.c[48]);
+            if (ajioDnM && (selectedMonth === 'ALL' || ajioDnM === selectedMonth)) {
+                const sDN = row.c[47] ? String(row.c[47].v || '').trim() : '';
+                if (sDN && sDN !== 'Other') {
+                    vendorReturnsAmt[sDN] = (vendorReturnsAmt[sDN] || 0) + parseValToNum(row.c[46]?.v);
+                    vendorReturnQty[sDN] = (vendorReturnQty[sDN] || 0) + parseValToNum(row.c[45]?.v);
+                }
+            }
+            
+            // Myntra CN
+            const mynCnM = extractMonthYearFromCell(row.c[52], row.c[61]);
+            if (mynCnM && (selectedMonth === 'ALL' || mynCnM === selectedMonth)) {
+                const sCN = row.c[60] ? String(row.c[60].v || '').trim() : '';
+                if (sCN && sCN !== 'Other') {
+                    vendorReturnsAmt[sCN] = (vendorReturnsAmt[sCN] || 0) + parseValToNum(row.c[59]?.v);
+                    vendorReturnQty[sCN] = (vendorReturnQty[sCN] || 0) + parseValToNum(row.c[58]?.v);
+                }
+            }
+            // Myntra DN
+            const mynDnM = extractMonthYearFromCell(row.c[55], row.c[74]);
+            if (mynDnM && (selectedMonth === 'ALL' || mynDnM === selectedMonth)) {
+                const sDN = row.c[73] ? String(row.c[73].v || '').trim() : '';
+                if (sDN && sDN !== 'Other') {
+                    vendorReturnsAmt[sDN] = (vendorReturnsAmt[sDN] || 0) + parseValToNum(row.c[72]?.v);
+                    vendorReturnQty[sDN] = (vendorReturnQty[sDN] || 0) + parseValToNum(row.c[71]?.v);
+                }
+            }
+            
+            // Flipkart CN
+            const fkCnM = extractMonthYearFromCell(row.c[78], row.c[87]);
+            if (fkCnM && (selectedMonth === 'ALL' || fkCnM === selectedMonth)) {
+                const sCN = row.c[86] ? String(row.c[86].v || '').trim() : '';
+                if (sCN && sCN !== 'Other') {
+                    vendorReturnsAmt[sCN] = (vendorReturnsAmt[sCN] || 0) + parseValToNum(row.c[85]?.v);
+                    vendorReturnQty[sCN] = (vendorReturnQty[sCN] || 0) + parseValToNum(row.c[84]?.v);
+                }
+            }
+            // Flipkart DN
+            const fkDnM = extractMonthYearFromCell(row.c[91], row.c[100]);
+            if (fkDnM && (selectedMonth === 'ALL' || fkDnM === selectedMonth)) {
+                const sDN = row.c[99] ? String(row.c[99].v || '').trim() : '';
+                if (sDN && sDN !== 'Other') {
+                    vendorReturnsAmt[sDN] = (vendorReturnsAmt[sDN] || 0) + parseValToNum(row.c[98]?.v);
+                    vendorReturnQty[sDN] = (vendorReturnQty[sDN] || 0) + parseValToNum(row.c[97]?.v);
+                }
+            }
+        });
+    }
+
+    const sortedVendorReturns = Object.keys(vendorReturnsAmt)
+        .map(s => ({ name: s, amount: Math.round(vendorReturnsAmt[s]) }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 5);
+
+    const vendorReturnNames = sortedVendorReturns.map(v => v.name);
+    const vendorReturnAmounts = sortedVendorReturns.map(v => v.amount);
+
+    const vendorSales = {};
+    const vendorPurchases = {};
+    const vendorDisputes = {};
+    const operatorCounts = {};
+    const opTotal = {};
+    const opDisputes = {};
+    
+    let amzDisputes = 0, amzClear = 0;
+    let ajioDisputes = 0, ajioClear = 0;
+    let mynDisputes = 0, mynClear = 0;
+    let fkDisputes = 0, fkClear = 0;
+
+    let bucketUnder500 = 0;
+    let bucket500to1000 = 0;
+    let bucket1000to2000 = 0;
+    let bucketOver2000 = 0;
+
+    monthlyData.rows.forEach(row => {
+        if (!row || !row.c) return;
+        
+        // Helper to check disputes and operators
+        const checkOpAndDispute = (tx, defaultUser, platformName) => {
+            const op = extractOperator(tx.time) || defaultUser;
+            if (op && op !== 'TRUE' && !op.includes('2026')) {
+                operatorCounts[op] = (operatorCounts[op] || 0) + 1;
+                opTotal[op] = (opTotal[op] || 0) + 1;
+            }
+            
+            let isDispute = false;
+            if (tx.status) {
+                const st = tx.status.toUpperCase();
+                if (st.includes('DISPUTE') || st.includes('HOLD') || st.includes('REJECT')) {
+                    isDispute = true;
+                    if (platformName === 'amz') amzDisputes++;
+                    if (platformName === 'ajio') ajioDisputes++;
+                    if (platformName === 'myn') mynDisputes++;
+                    if (platformName === 'fk') fkDisputes++;
+                    
+                    if (op && op !== 'TRUE' && !op.includes('2026')) {
+                        opDisputes[op] = (opDisputes[op] || 0) + 1;
+                    }
+                    if (tx.vendor) {
+                        vendorDisputes[tx.vendor] = (vendorDisputes[tx.vendor] || 0) + 1;
+                    }
+                } else if (st === 'ALL CLEAR') {
+                    if (platformName === 'amz') amzClear++;
+                    if (platformName === 'ajio') ajioClear++;
+                    if (platformName === 'myn') mynClear++;
+                    if (platformName === 'fk') fkClear++;
+                }
+            }
+        };
+
+        const classifyBucket = (saleVal) => {
+            if (saleVal > 0) {
+                if (saleVal < 500) bucketUnder500++;
+                else if (saleVal <= 1000) bucket500to1000++;
+                else if (saleVal <= 2000) bucket1000to2000++;
+                else bucketOver2000++;
+            }
+        };
+        
+        // Amazon (Offset 0)
+        const amzM = extractMonthYearFromCell(row.c[0], row.c[15]);
+        if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
+            const tx = extractPlatformTx(row, 0, true, false, false, false);
+            if (tx.vendor) {
+                vendorSales[tx.vendor] = (vendorSales[tx.vendor] || 0) + tx.sale;
+                vendorPurchases[tx.vendor] = (vendorPurchases[tx.vendor] || 0) + tx.purchase;
+                const q = parseValToNum(row.c[5]?.v);
+                vendorSalesQty[tx.vendor] = (vendorSalesQty[tx.vendor] || 0) + q;
+            }
+            const user = row.c[18] ? String(row.c[18].v || '').trim().toUpperCase() : null;
+            checkOpAndDispute(tx, user, 'amz');
+            classifyBucket(tx.sale);
+        }
+        
+        // Ajio (Offset 21)
+        const ajioM = extractMonthYearFromCell(row.c[21], row.c[36]);
+        if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
+            const tx = extractPlatformTx(row, 21, false, true, false, false);
+            if (tx.vendor) {
+                vendorSales[tx.vendor] = (vendorSales[tx.vendor] || 0) + tx.sale;
+                vendorPurchases[tx.vendor] = (vendorPurchases[tx.vendor] || 0) + tx.purchase;
+                const q = parseValToNum(row.c[26]?.v);
+                vendorSalesQty[tx.vendor] = (vendorSalesQty[tx.vendor] || 0) + q;
+            }
+            checkOpAndDispute(tx, null, 'ajio');
+            classifyBucket(tx.sale);
+        }
+        
+        // Myntra (Offset 42)
+        const mynM = extractMonthYearFromCell(row.c[42], row.c[57]);
+        if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
+            const tx = extractPlatformTx(row, 42, false, false, true, false);
+            if (tx.vendor) {
+                vendorSales[tx.vendor] = (vendorSales[tx.vendor] || 0) + tx.sale;
+                vendorPurchases[tx.vendor] = (vendorPurchases[tx.vendor] || 0) + tx.purchase;
+                const q = parseValToNum(row.c[47]?.v);
+                vendorSalesQty[tx.vendor] = (vendorSalesQty[tx.vendor] || 0) + q;
+            }
+            checkOpAndDispute(tx, null, 'myn');
+            classifyBucket(tx.sale);
+        }
+        
+        // Flipkart (Offset 62)
+        const fkM = extractMonthYearFromCell(row.c[62], row.c[77]);
+        if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
+            const tx = extractPlatformTx(row, 62, false, false, false, true);
+            if (tx.vendor) {
+                vendorSales[tx.vendor] = (vendorSales[tx.vendor] || 0) + tx.sale;
+                vendorPurchases[tx.vendor] = (vendorPurchases[tx.vendor] || 0) + tx.purchase;
+                const q = parseValToNum(row.c[67]?.v);
+                vendorSalesQty[tx.vendor] = (vendorSalesQty[tx.vendor] || 0) + q;
+            }
+            const user = row.c[80] ? String(row.c[80].v || '').trim().toUpperCase() : null;
+            checkOpAndDispute(tx, user, 'fk');
+            classifyBucket(tx.sale);
+        }
+    });
+
+    // Formatting Top Vendors
+    const sortedVendors = Object.keys(vendorSales)
+        .map(v => ({
+            name: v,
+            sale: Math.round(vendorSales[v]),
+            purchase: Math.round(vendorPurchases[v] || 0)
+        }))
+        .filter(v => v.name !== '' && v.name !== 'Other')
+        .sort((a, b) => b.sale - a.sale)
+        .slice(0, 5);
+
+    const vendorNames = sortedVendors.map(v => v.name);
+    const vendorSalesArr = sortedVendors.map(v => v.sale);
+    const vendorPurchasesArr = sortedVendors.map(v => v.purchase);
+
+    // Vendor Return Rates for Top Vendors by Qty
+    const sortedVendorsByQty = Object.keys(vendorSalesQty)
+        .map(v => ({
+            name: v,
+            salesQty: vendorSalesQty[v],
+            returnQty: vendorReturnQty[v] || 0
+        }))
+        .filter(v => v.name !== '' && v.name !== 'Other')
+        .sort((a, b) => b.salesQty - a.salesQty)
+        .slice(0, 5);
+
+    const vendorQtyNames = sortedVendorsByQty.map(v => v.name);
+    const vendorReturnRates = sortedVendorsByQty.map(v => {
+        return v.salesQty > 0 ? parseFloat(((v.returnQty / v.salesQty) * 100).toFixed(2)) : 0;
+    });
+
+    // Formatting Operators by Volume
+    const sortedOperators = Object.keys(operatorCounts)
+        .map(op => ({ name: op, count: operatorCounts[op] }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+    const opNames = sortedOperators.map(o => o.name);
+    const opCounts = sortedOperators.map(o => o.count);
+
+    // Operator Dispute Rates
+    const sortedOpsByVolume = Object.keys(opTotal)
+        .map(op => ({
+            name: op,
+            total: opTotal[op],
+            disputes: opDisputes[op] || 0
+        }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 5);
+
+    const opRateNames = sortedOpsByVolume.map(o => o.name);
+    const opDisputeRates = sortedOpsByVolume.map(o => {
+        return o.total > 0 ? parseFloat(((o.disputes / o.total) * 100).toFixed(2)) : 0;
+    });
+
+    // Disputed Vendors
+    const sortedDisputedVendors = Object.keys(vendorDisputes)
+        .map(v => ({ name: v, disputes: vendorDisputes[v] }))
+        .filter(v => v.name !== '' && v.name !== 'Other')
+        .sort((a, b) => b.disputes - a.disputes)
+        .slice(0, 5);
+
+    const disputedVendorNames = sortedDisputedVendors.map(v => v.name);
+    const disputedVendorCounts = sortedDisputedVendors.map(v => v.disputes);
+
+    // Theme Configs
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDark ? '#94a3b8' : '#64748b';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+    const tooltipTheme = isDark ? 'dark' : 'light';
+    const globalBrandColors = ['#ff9900', '#d81b60', '#ff3f6c', '#2874f0']; // Amazon, Ajio, Myntra, Flipkart
+
+    // ==========================================
+    // RENDER 18 CHARTS INSTANCES
+    // ==========================================
+
+    // SECTION 1: FINANCIALS
+    
+    // 1. Consolidated Trend (Area Chart)
+    const trendOptions = {
+        chart: { type: 'area', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        stroke: { curve: 'smooth', width: 2 },
+        colors: ['#6366f1', '#f43f5e', '#f59e0b'],
+        fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.25, opacityTo: 0.01 } },
+        grid: { borderColor: gridColor },
+        xaxis: { categories: sortedMonths, labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => '₹' + formatNumberCompact(v) } },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'Consolidated Sales', data: salesTrend },
+            { name: 'Consolidated Purchases', data: purchaseTrend },
+            { name: 'Consolidated Returns', data: returnsTrend }
+        ]
+    };
+    renderOrUpdateChart('global-chart-trend', 'globalTrend', trendOptions);
+
+    // 2. Sales Share (Donut Chart)
+    const salesShareOptions = {
+        chart: { type: 'donut', height: 240, width: '100%', background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: globalBrandColors,
+        stroke: { colors: [isDark ? '#151c2c' : '#ffffff'], width: 2 },
+        labels: ['Amazon', 'Ajio', 'Myntra', 'Flipkart'],
+        dataLabels: { enabled: true, formatter: (val) => val.toFixed(1) + "%" },
+        legend: { position: 'bottom', labels: { colors: textColor } },
+        tooltip: { theme: tooltipTheme },
+        series: [Math.round(amzSalesSel), Math.round(ajioSalesSel), Math.round(mynSalesSel), Math.round(fkSalesSel)]
+    };
+    renderOrUpdateChart('global-chart-sales-share', 'globalSalesShare', salesShareOptions);
+
+    // 3. Sales Growth (Line Chart)
+    const salesGrowthOptions = {
+        chart: { type: 'line', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        stroke: { curve: 'smooth', width: 2.5 },
+        colors: globalBrandColors,
+        grid: { borderColor: gridColor },
+        xaxis: { categories: sortedMonths, labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => '₹' + formatNumberCompact(v) } },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'Amazon Sales', data: amzSalesTrend },
+            { name: 'Ajio Sales', data: ajioSalesTrend },
+            { name: 'Myntra Sales', data: mynSalesTrend },
+            { name: 'Flipkart Sales', data: fkSalesTrend }
+        ]
+    };
+    renderOrUpdateChart('global-chart-sales-growth', 'globalSalesGrowth', salesGrowthOptions);
+
+    // 4. Purchase Growth (Line Chart)
+    const purchaseGrowthOptions = {
+        chart: { type: 'line', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        stroke: { curve: 'smooth', width: 2.5 },
+        colors: globalBrandColors,
+        grid: { borderColor: gridColor },
+        xaxis: { categories: sortedMonths, labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => '₹' + formatNumberCompact(v) } },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'Amazon Purchase', data: amzPurchaseTrend },
+            { name: 'Ajio Purchase', data: ajioPurchaseTrend },
+            { name: 'Myntra Purchase', data: mynPurchaseTrend },
+            { name: 'Flipkart Purchase', data: fkPurchaseTrend }
+        ]
+    };
+    renderOrUpdateChart('global-chart-purchases-growth', 'globalPurchasesGrowth', purchaseGrowthOptions);
+
+    // 5. Monthly Net Profit Trend (Line Chart) [NEW]
+    const netProfitOptions = {
+        chart: { type: 'line', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        stroke: { curve: 'smooth', width: 3 },
+        colors: ['#10b981'],
+        grid: { borderColor: gridColor },
+        xaxis: { categories: sortedMonths, labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => '₹' + formatNumberCompact(v) } },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: 'Net Profit', data: netProfitTrend }]
+    };
+    renderOrUpdateChart('global-chart-net-profit', 'globalNetProfit', netProfitOptions);
+
+    // 6. Marketplace Margin % (Column Chart) [NEW]
+    const amzMargin = amzSalesSel > 0 ? parseFloat((((amzSalesSel - amzPurchasesSel) / amzSalesSel) * 100).toFixed(1)) : 0;
+    const ajioMargin = ajioSalesSel > 0 ? parseFloat((((ajioSalesSel - ajioPurchasesSel) / ajioSalesSel) * 100).toFixed(1)) : 0;
+    const mynMargin = mynSalesSel > 0 ? parseFloat((((mynSalesSel - mynPurchasesSel) / mynSalesSel) * 100).toFixed(1)) : 0;
+    const fkMargin = fkSalesSel > 0 ? parseFloat((((fkSalesSel - fkPurchasesSel) / fkSalesSel) * 100).toFixed(1)) : 0;
+
+    const profitabilityOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: globalBrandColors,
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { columnWidth: '45%', distributed: true, borderRadius: 4 } },
+        xaxis: { categories: ['Amazon', 'Ajio', 'Myntra', 'Flipkart'], labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => v.toFixed(1) + "%" } },
+        tooltip: { theme: tooltipTheme },
+        legend: { show: false },
+        series: [{ name: 'Margin %', data: [amzMargin, ajioMargin, mynMargin, fkMargin] }]
+    };
+    renderOrUpdateChart('global-chart-platform-profitability', 'globalPlatformProfitability', profitabilityOptions);
+
+
+    // SECTION 2: RETURNS & QUALITY
+
+    // 7. Returns Share (Donut Chart)
+    const returnsShareOptions = {
+        chart: { type: 'donut', height: 240, width: '100%', background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: globalBrandColors,
+        stroke: { colors: [isDark ? '#151c2c' : '#ffffff'], width: 2 },
+        labels: ['Amazon', 'Ajio', 'Myntra', 'Flipkart'],
+        dataLabels: { enabled: true, formatter: (val) => val.toFixed(1) + "%" },
+        legend: { position: 'bottom', labels: { colors: textColor } },
+        tooltip: { theme: tooltipTheme },
+        series: [Math.round(amzReturnsSel), Math.round(ajioReturnsSel), Math.round(mynReturnsSel), Math.round(fkReturnsSel)]
+    };
+    renderOrUpdateChart('global-chart-returns-share', 'globalReturnsShare', returnsShareOptions);
+
+    // 8. Return Rate Trend (Line Chart)
+    const returnRateOptions = {
+        chart: { type: 'line', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        stroke: { curve: 'smooth', width: 2.5 },
+        colors: globalBrandColors,
+        grid: { borderColor: gridColor },
+        xaxis: { categories: sortedMonths, labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => v.toFixed(1) + "%" } },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'Amazon CN Rate %', data: amzReturnRateTrend },
+            { name: 'Ajio CN Rate %', data: ajioReturnRateTrend },
+            { name: 'Myntra CN Rate %', data: mynReturnRateTrend },
+            { name: 'Flipkart CN Rate %', data: fkReturnRateTrend }
+        ]
+    };
+    renderOrUpdateChart('global-chart-return-rate-trend', 'globalReturnRateTrend', returnRateOptions);
+
+    // 9. Return Qty vs CN Value Correlation (Dual-Axis Chart) [NEW]
+    const correlationOptions = {
+        chart: { type: 'line', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#06b6d4', '#ff3f6c'],
+        stroke: { width: [0, 3] },
+        plotOptions: { bar: { columnWidth: '40%', borderRadius: 4 } },
+        xaxis: { categories: ['Amazon', 'Ajio', 'Myntra', 'Flipkart'], labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: [
+            { title: { text: 'Return Qty', style: { color: textColor } }, labels: { style: { colors: textColor } } },
+            { opposite: true, title: { text: 'CN Value (₹)', style: { color: textColor } }, labels: { style: { colors: textColor }, formatter: (v) => '₹' + formatNumberCompact(v) } }
+        ],
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'Return Quantity', type: 'column', data: [amzReturnQty, ajioReturnQty, mynReturnQty, fkReturnQty] },
+            { name: 'Credit Note Value', type: 'line', data: [amzReturnsSel, ajioReturnsSel, mynReturnsSel, fkReturnsSel] }
+        ]
+    };
+    renderOrUpdateChart('global-chart-return-correlation', 'globalReturnCorrelation', correlationOptions);
+
+    // 10. Vendor Return Contribution (Donut Chart) [NEW]
+    const vendorReturnsOptions = {
+        chart: { type: 'donut', height: 240, width: '100%', background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#ef4444'],
+        stroke: { colors: [isDark ? '#151c2c' : '#ffffff'], width: 2 },
+        labels: vendorReturnNames.length > 0 ? vendorReturnNames : ['No Returns'],
+        dataLabels: { enabled: true },
+        legend: { position: 'bottom', labels: { colors: textColor } },
+        tooltip: { theme: tooltipTheme },
+        series: vendorReturnAmounts.length > 0 ? vendorReturnAmounts : [0]
+    };
+    renderOrUpdateChart('global-chart-vendor-returns', 'globalVendorReturns', vendorReturnsOptions);
+
+    // 11. Vendor Return Rate % (Column Chart) [NEW]
+    const vendorReturnRateOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#ef4444'],
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { columnWidth: '40%', borderRadius: 4 } },
+        xaxis: { categories: vendorQtyNames, labels: { style: { colors: textColor, fontSize: '9px' }, hideOverlappingLabels: true } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => v.toFixed(1) + "%" } },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: 'Return Rate %', data: vendorReturnRates }]
+    };
+    renderOrUpdateChart('global-chart-vendor-return-rate', 'globalVendorReturnRate', vendorReturnRateOptions);
+
+
+    // SECTION 3: OPERATIONS & STAFF
+    
+    // 12. Operator Performance Leaderboard (Horizontal Bar)
+    const operatorsOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#06b6d4'],
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { horizontal: true, barHeight: '50%', borderRadius: 4 } },
+        xaxis: { categories: opNames, labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: 'Invoices Processed', data: opCounts }]
+    };
+    renderOrUpdateChart('global-chart-user-leaderboard', 'globalUserLeaderboard', operatorsOptions);
+
+    // 13. Disputes vs Clear (Stacked Column)
+    const disputesOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', stacked: true, toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#10b981', '#ef4444'], // Emerald (Clear) vs Rose (Dispute)
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { columnWidth: '45%', borderRadius: 4 } },
+        xaxis: { categories: ['Amazon', 'Ajio', 'Myntra', 'Flipkart'], labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+        legend: { position: 'bottom', labels: { colors: textColor } },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'All Clear', data: [amzClear, ajioClear, mynClear, fkClear] },
+            { name: 'Disputed', data: [amzDisputes, ajioDisputes, mynDisputes, fkDisputes] }
+        ]
+    };
+    renderOrUpdateChart('global-chart-disputes', 'globalDisputes', disputesOptions);
+
+    // 14. Platform Dispute Rate % (Column Chart) [NEW]
+    const amzDispRate = (amzClear + amzDisputes) > 0 ? parseFloat(((amzDisputes / (amzClear + amzDisputes)) * 100).toFixed(1)) : 0;
+    const ajioDispRate = (ajioClear + ajioDisputes) > 0 ? parseFloat(((ajioDisputes / (ajioClear + ajioDisputes)) * 100).toFixed(1)) : 0;
+    const mynDispRate = (mynClear + mynDisputes) > 0 ? parseFloat(((mynDisputes / (mynClear + mynDisputes)) * 100).toFixed(1)) : 0;
+    const fkDispRate = (fkClear + fkDisputes) > 0 ? parseFloat(((fkDisputes / (fkClear + fkDisputes)) * 100).toFixed(1)) : 0;
+
+    const platformDisputeRateOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: globalBrandColors,
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { columnWidth: '45%', distributed: true, borderRadius: 4 } },
+        xaxis: { categories: ['Amazon', 'Ajio', 'Myntra', 'Flipkart'], labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => v.toFixed(1) + "%" } },
+        tooltip: { theme: tooltipTheme },
+        legend: { show: false },
+        series: [{ name: 'Dispute Rate %', data: [amzDispRate, ajioDispRate, mynDispRate, fkDispRate] }]
+    };
+    renderOrUpdateChart('global-chart-platform-dispute-rate', 'globalPlatformDisputeRate', platformDisputeRateOptions);
+
+    // 15. Top 5 Vendors (Grouped Column)
+    const vendorsOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#6366f1', '#f43f5e'],
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { columnWidth: '55%', borderRadius: 4 } },
+        xaxis: { categories: vendorNames, labels: { style: { colors: textColor, fontSize: '9px' }, hideOverlappingLabels: true } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => '₹' + formatNumberCompact(v) } },
+        legend: { position: 'bottom', labels: { colors: textColor } },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'Sales Value', data: vendorSalesArr },
+            { name: 'Purchase Value', data: vendorPurchasesArr }
+        ]
+    };
+    renderOrUpdateChart('global-chart-vendors', 'globalVendors', vendorsOptions);
+
+    // 16. Operator Dispute Rate % (Horizontal Bar Chart) [NEW]
+    const operatorDisputeRateOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#f59e0b'],
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { horizontal: true, barHeight: '50%', borderRadius: 4 } },
+        xaxis: { labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => v.toFixed(1) + "%" } },
+        yaxis: { categories: opRateNames, labels: { style: { colors: textColor, fontSize: '11px' } } },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: 'Dispute Rate %', data: opDisputeRates }]
+    };
+    renderOrUpdateChart('global-chart-operator-dispute-rate', 'globalOperatorDisputeRate', operatorDisputeRateOptions);
+
+    // 17. Invoice Value Buckets (Bar Chart) [NEW]
+    const invoiceBucketsOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#8b5cf6'],
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { columnWidth: '50%', borderRadius: 4 } },
+        xaxis: { categories: ['< ₹500', '₹500 - ₹1000', '₹1000 - ₹2000', '> ₹2000'], labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: 'Invoices Count', data: [bucketUnder500, bucket500to1000, bucket1000to2000, bucketOver2000] }]
+    };
+    renderOrUpdateChart('global-chart-invoice-buckets', 'globalInvoiceBuckets', invoiceBucketsOptions);
+
+    // 18. Top 5 Disputed Vendors (Horizontal Bar Chart) [NEW]
+    const topDisputedVendorsOptions = {
+        chart: { type: 'bar', height: 240, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#ef4444'],
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { horizontal: true, barHeight: '50%', borderRadius: 4 } },
+        xaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+        yaxis: { categories: disputedVendorNames, labels: { style: { colors: textColor, fontSize: '9px' } } },
+        tooltip: { theme: tooltipTheme },
+        series: [{ name: 'Disputes Count', data: disputedVendorCounts }]
+    };
+    renderOrUpdateChart('global-chart-top-disputed-vendors', 'globalTopDisputedVendors', topDisputedVendorsOptions);
+
+    // Redraw Lucide Icons in KPI cards
+    if (window.lucide) {
+        lucide.createIcons();
+    }
+}
+
+/**
+ * Parses raw gviz json responses and invokes consolidation for User Analysis
+ */
+function parseUserAnalysisData(results) {
+    let allReport = null;
+    let monthlyData = null;
+    let allReturnReport = null;
+    let monthlyReturnData = null;
+
+    results.forEach(res => {
+        const parsed = parseRawGvizJson(res.text);
+        if (res.tab === 'ALL REPORT') allReport = parsed;
+        if (res.tab === 'MONTHLY DATA') monthlyData = parsed;
+        if (res.tab === 'ALL RETURN REPORT') allReturnReport = parsed;
+        if (res.tab === 'MONTHLY RETURN DATA') monthlyReturnData = parsed;
+    });
+
+    if (!allReport || !monthlyData || !allReturnReport) {
+        console.error("Failed to parse critical sheets for consolidated user analysis.");
+        return;
+    }
+
+    currentDashboardData = { allReport, monthlyData, allReturnReport, monthlyReturnData };
+
+    // 1. Collect unique month names
+    const monthKeys = new Set();
+    allReport.rows.forEach(row => {
+        if (!row || !row.c) return;
+        [0, 8, 16, 24].forEach(idx => {
+            const m = extractMonthYearFromCell(row.c[idx]);
+            if (m) monthKeys.add(m);
+        });
+    });
+
+    const sortedMonths = Array.from(monthKeys).sort((a, b) => {
+        const parseDate = (str) => {
+            const parts = str.split(' ');
+            const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(parts[0]);
+            return new Date(parts[1] || 2026, m >= 0 ? m : 0, 1);
+        };
+        return parseDate(a) - parseDate(b);
+    });
+
+    // 2. Populate Dropdown Month Filter
+    const filterSelect = document.getElementById('user-month-filter');
+    if (filterSelect) {
+        filterSelect.innerHTML = '<option value="ALL">All Months</option>';
+        sortedMonths.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            filterSelect.appendChild(opt);
+        });
+
+        // Replace with clean clone to detach previous event listeners
+        const newSelect = filterSelect.cloneNode(true);
+        filterSelect.parentNode.replaceChild(newSelect, filterSelect);
+
+        newSelect.addEventListener('change', (e) => {
+            renderUserDashboard(e.target.value, sortedMonths);
+        });
+    }
+
+    // Wire sort dropdown if not already wired
+    const sortSelect = document.getElementById('leaderboard-sort-select');
+    if (sortSelect && !sortSelect.dataset.wired) {
+        sortSelect.dataset.wired = 'true';
+        sortSelect.addEventListener('change', () => {
+            renderUserDashboard(state.selectedUserMonth || 'ALL', sortedMonths);
+        });
+    }
+
+    // 3. Render initial dashboard
+    renderUserDashboard('ALL', sortedMonths);
+}
+
+/**
+ * Calculates and renders User Performance analytics and charts
+ */
+function renderUserDashboard(selectedMonth, sortedMonths) {
+    if (!currentDashboardData) return;
+
+    const { monthlyData, monthlyReturnData } = currentDashboardData;
+    const users = {};
+
+    const isValidOperator = (op) => {
+        return op && op !== 'TRUE' && !op.includes('2026') && op.length > 2;
+    };
+
+    const ensureUser = (name) => {
+        if (!users[name]) {
+            users[name] = {
+                name: name,
+                salesCount: 0,
+                salesAmount: 0,
+                salesQty: 0,
+                purchaseQty: 0,
+                returnCount: 0,
+                returnAmount: 0,
+                disputes: 0,
+                platforms: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                platformSales: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                platformPurchases: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                platformSalesQty: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                platformPurchasesQty: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                platformReturnsCount: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                platformReturnsAmount: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                dailyLog: {}
+            };
+        }
+        return users[name];
+    };
+
+    // Helper to extract a short date string (DD-MM-YYYY) from a cell (can be Date object, timestamp string, or fallback)
+    const extractDateKey = (cell, fallbackCell) => {
+        if (!cell || (cell.v === null && cell.f === null)) {
+            return fallbackCell ? extractDateKey(fallbackCell) : null;
+        }
+
+        // 1. Try extracting from formatted value cell.f first, as it contains the exact day/month/year shown in the sheet
+        if (cell.f) {
+            let fVal = String(cell.f);
+            // Match DD/MM/YYYY or MM/DD/YYYY or M/D/YYYY or D/M/YYYY
+            const match = fVal.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+            if (match) {
+                const dd = match[1].padStart(2, '0');
+                const mm = match[2].padStart(2, '0');
+                const yyyy = match[3].length === 2 ? '20' + match[3] : match[3];
+                return `${dd}-${mm}-${yyyy}`;
+            }
+        }
+        
+        let val = cell.v !== null && cell.v !== undefined ? String(cell.v) : '';
+        
+        // 2. Try matching timestamp string starting with Date/Time like "03/07/2026 10:41:46 - JANVI"
+        // Regex matches DD/MM/YYYY or MM/DD/YYYY or M/D/YYYY or D/M/YYYY
+        const match = val.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+        if (match) {
+            const dd = match[1].padStart(2, '0');
+            const mm = match[2].padStart(2, '0');
+            return `${dd}-${mm}-${match[3]}`;
+        }
+        const matchShortYear = val.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2})/);
+        if (matchShortYear) {
+            const dd = matchShortYear[1].padStart(2, '0');
+            const mm = matchShortYear[2].padStart(2, '0');
+            return `${dd}-${mm}-20${matchShortYear[3]}`;
+        }
+
+        // 3. Try parsing Google Date string Date(y, m, d)
+        if (val.startsWith('Date(')) {
+            let dateObj = parseGoogleDateString(val);
+            if (dateObj instanceof Date) {
+                const dd = String(dateObj.getDate()).padStart(2, '0');
+                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                return `${dd}-${mm}-${dateObj.getFullYear()}`;
+            }
+        }
+        
+        // 4. Try parsing fallback if this cell was just a name or text
+        if (fallbackCell) {
+            return extractDateKey(fallbackCell);
+        }
+        
+        return null;
+    };
+
+    const ensureDailyEntry = (u, dateKey) => {
+        if (!dateKey) return null;
+        if (!u.dailyLog[dateKey]) {
+            u.dailyLog[dateKey] = {
+                invoices: 0,
+                amount: 0,
+                disputes: 0,
+                returns: 0,
+                platforms: {
+                    amz: { invoices: 0, sale: 0, purchase: 0, saleQty: 0, purchaseQty: 0, returns: 0, returnAmt: 0 },
+                    ajio: { invoices: 0, sale: 0, purchase: 0, saleQty: 0, purchaseQty: 0, returns: 0, returnAmt: 0 },
+                    myn: { invoices: 0, sale: 0, purchase: 0, saleQty: 0, purchaseQty: 0, returns: 0, returnAmt: 0 },
+                    fk: { invoices: 0, sale: 0, purchase: 0, saleQty: 0, purchaseQty: 0, returns: 0, returnAmt: 0 }
+                }
+            };
+        }
+        return u.dailyLog[dateKey];
+    };
+
+    // Helper to check and accumulate invoice row
+    const processInvoice = (opCell, defaultUser, saleVal, purchaseVal, statusVal, platformKey, fallbackDateCell, saleQtyVal, purchaseQtyVal) => {
+        let op = extractOperator(opCell?.v) || defaultUser;
+        if (op) op = op.trim().toUpperCase();
+        if (isValidOperator(op)) {
+            const u = ensureUser(op);
+            const amt = parseValToNum(saleVal);
+            const pAmt = parseValToNum(purchaseVal);
+            const sQty = parseValToNum(saleQtyVal) || 1;
+            const pQty = parseValToNum(purchaseQtyVal) || 1;
+            
+            u.salesCount++;
+            u.salesAmount += amt;
+            u.salesQty += sQty;
+            u.purchaseQty += pQty;
+            
+            u.platforms[platformKey]++;
+            u.platformSales[platformKey] += amt;
+            u.platformPurchases[platformKey] += pAmt;
+            u.platformSalesQty[platformKey] += sQty;
+            u.platformPurchasesQty[platformKey] += pQty;
+            
+            let isDispute = false;
+            if (statusVal) {
+                const st = String(statusVal).toUpperCase();
+                if (st.includes('DISPUTE') || st.includes('HOLD') || st.includes('REJECT')) {
+                    u.disputes++;
+                    isDispute = true;
+                }
+            }
+
+            // Daily log tracking (Primary: operator timestamp cell, Fallback: invoice date cell)
+            const dk = extractDateKey(opCell, fallbackDateCell);
+            const dayEntry = ensureDailyEntry(u, dk);
+            if (dayEntry) {
+                dayEntry.invoices++;
+                dayEntry.amount += amt;
+                if (isDispute) dayEntry.disputes++;
+
+                // Track platform breakdown for this day
+                const pInfo = dayEntry.platforms[platformKey];
+                pInfo.invoices++;
+                pInfo.sale += amt;
+                pInfo.purchase += pAmt;
+                pInfo.saleQty += sQty;
+                pInfo.purchaseQty += pQty;
+            }
+        }
+    };
+
+    // 1. Process Sales / Invoices Data
+    if (monthlyData && monthlyData.rows) {
+        monthlyData.rows.forEach(row => {
+            if (!row || !row.c) return;
+
+            // Amazon (Offset 0)
+            const amzM = extractMonthYearFromCell(row.c[0], row.c[15]);
+            if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
+                const user = row.c[18] ? String(row.c[18].v || '').trim().toUpperCase() : null;
+                processInvoice(row.c[15], user, row.c[6]?.v, row.c[13]?.v, row.c[16]?.v, 'amz', row.c[0], row.c[5]?.v, row.c[12]?.v);
+            }
+            
+            // Ajio (Offset 21)
+            const ajioM = extractMonthYearFromCell(row.c[21], row.c[36]);
+            if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
+                processInvoice(row.c[36], null, row.c[27]?.v, row.c[34]?.v, row.c[37]?.v, 'ajio', row.c[21], row.c[26]?.v, row.c[33]?.v);
+            }
+            
+            // Myntra (Offset 42)
+            const mynM = extractMonthYearFromCell(row.c[42], row.c[57]);
+            if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
+                processInvoice(row.c[57], null, row.c[48]?.v, row.c[55]?.v, row.c[58]?.v, 'myn', row.c[42], row.c[47]?.v, row.c[54]?.v);
+            }
+            
+            // Flipkart (Offset 62)
+            const fkM = extractMonthYearFromCell(row.c[62], row.c[77]);
+            if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
+                const user = row.c[80] ? String(row.c[80].v || '').trim().toUpperCase() : null;
+                processInvoice(row.c[77], user, row.c[68]?.v, row.c[75]?.v, row.c[78]?.v, 'fk', row.c[62], row.c[67]?.v, row.c[74]?.v);
+            }
+        });
+    }
+
+    // 2. Process Returns Data
+    const processReturn = (opCell, amtVal, platformKey, fallbackDateCell) => {
+        let op = extractOperator(opCell?.v);
+        if (op) op = op.trim().toUpperCase();
+        if (isValidOperator(op)) {
+            const u = ensureUser(op);
+            const amt = parseValToNum(amtVal);
+            u.returnCount++;
+            u.returnAmount += amt;
+            u.platforms[platformKey]++;
+            u.platformReturnsCount[platformKey]++;
+            u.platformReturnsAmount[platformKey] += amt;
+
+            const dk = extractDateKey(opCell, fallbackDateCell);
+            const dayEntry = ensureDailyEntry(u, dk);
+            if (dayEntry) {
+                dayEntry.returns++;
+
+                // Track platform breakdown for this day
+                const pInfo = dayEntry.platforms[platformKey];
+                pInfo.returns++;
+                pInfo.returnAmt += amt;
+            }
+        }
+    };
+
+    if (monthlyReturnData && monthlyReturnData.rows) {
+        monthlyReturnData.rows.forEach(row => {
+            if (!row || !row.c) return;
+            
+            // Amazon CN
+            if (extractMonthYearFromCell(row.c[0], row.c[9]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[0], row.c[9]) === selectedMonth)) {
+                processReturn(row.c[9], row.c[7]?.v, 'amz', row.c[0]);
+            }
+            // Amazon DN
+            if (extractMonthYearFromCell(row.c[13], row.c[22]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[13], row.c[22]) === selectedMonth)) {
+                processReturn(row.c[22], row.c[20]?.v, 'amz', row.c[13]);
+            }
+            // Ajio CN
+            if (extractMonthYearFromCell(row.c[26], row.c[35]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[26], row.c[35]) === selectedMonth)) {
+                processReturn(row.c[35], row.c[33]?.v, 'ajio', row.c[26]);
+            }
+            // Ajio DN
+            if (extractMonthYearFromCell(row.c[39], row.c[48]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[39], row.c[48]) === selectedMonth)) {
+                processReturn(row.c[48], row.c[46]?.v, 'ajio', row.c[39]);
+            }
+            // Myntra CN
+            if (extractMonthYearFromCell(row.c[52], row.c[61]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[52], row.c[61]) === selectedMonth)) {
+                processReturn(row.c[61], row.c[59]?.v, 'myn', row.c[52]);
+            }
+            // Myntra DN
+            if (extractMonthYearFromCell(row.c[55], row.c[74]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[55], row.c[74]) === selectedMonth)) {
+                processReturn(row.c[74], row.c[72]?.v, 'myn', row.c[55]);
+            }
+            // Flipkart CN
+            if (extractMonthYearFromCell(row.c[78], row.c[87]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[78], row.c[87]) === selectedMonth)) {
+                processReturn(row.c[87], row.c[85]?.v, 'fk', row.c[78]);
+            }
+            // Flipkart DN
+            if (extractMonthYearFromCell(row.c[91], row.c[100]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[91], row.c[100]) === selectedMonth)) {
+                processReturn(row.c[100], row.c[98]?.v, 'fk', row.c[91]);
+            }
+        });
+    }
+
+    // Save selected month to state so we know it on re-sort
+    state.selectedUserMonth = selectedMonth || 'ALL';
+
+    // 3. Compile list, sort, and rank
+    const operatorList = Object.values(users);
+    
+    // First calculate base metrics for sorting
+    operatorList.forEach(u => {
+        u.disputeRate = u.salesCount > 0 ? parseFloat(((u.disputes / u.salesCount) * 100).toFixed(1)) : 0;
+        u.accuracyRate = 100 - u.disputeRate;
+        u.avgValue = u.salesCount > 0 ? u.salesAmount / u.salesCount : 0;
+    });
+
+    const sortKey = document.getElementById('leaderboard-sort-select')?.value || 'salesAmount';
+    if (sortKey === 'salesAmount') {
+        operatorList.sort((a, b) => b.salesAmount - a.salesAmount);
+    } else if (sortKey === 'salesCount') {
+        operatorList.sort((a, b) => b.salesCount - a.salesCount);
+    } else if (sortKey === 'accuracy') {
+        operatorList.sort((a, b) => b.accuracyRate - a.accuracyRate || b.salesAmount - a.salesAmount);
+    } else if (sortKey === 'returnCount') {
+        operatorList.sort((a, b) => b.returnCount - a.returnCount || b.salesAmount - a.salesAmount);
+    }
+
+    let totalVolumeCount = 0;
+    let avgDisputeRateSum = 0;
+    
+    operatorList.forEach((u, index) => {
+        u.rank = index + 1;
+        totalVolumeCount += (u.salesCount + u.returnCount);
+        avgDisputeRateSum += u.disputeRate;
+
+        // Marketplace Specialty Badge
+        const totalPlatformTx = u.platforms.amz + u.platforms.ajio + u.platforms.myn + u.platforms.fk;
+        const platformNames = { amz: 'Amazon', ajio: 'Ajio', myn: 'Myntra', fk: 'Flipkart' };
+        const platformColors = { amz: '#ff9900', ajio: '#10b981', myn: '#f43f5e', fk: '#0083ca' };
+        let maxPlatform = 'amz';
+        let maxPlatformCount = 0;
+        for (const pk of ['amz', 'ajio', 'myn', 'fk']) {
+            if (u.platforms[pk] > maxPlatformCount) {
+                maxPlatformCount = u.platforms[pk];
+                maxPlatform = pk;
+            }
+        }
+        const dominanceRatio = totalPlatformTx > 0 ? maxPlatformCount / totalPlatformTx : 0;
+        if (dominanceRatio > 0.6) {
+            u.specialty = `${platformNames[maxPlatform]} Pro`;
+            u.specialtyColor = platformColors[maxPlatform];
+        } else {
+            u.specialty = 'Generalist';
+            u.specialtyColor = '#8b5cf6';
+        }
+
+        // Ratings
+        if (u.disputeRate <= 2) {
+            u.grade = 'A';
+            u.badge = '🏆 Gold Star';
+            u.badgeColor = '#eab308'; // Gold
+        } else if (u.disputeRate <= 5) {
+            u.grade = 'B';
+            u.badge = '⭐ Silver Star';
+            u.badgeColor = '#94a3b8'; // Silver
+        } else {
+            u.grade = 'C';
+            u.badge = '⚠️ Risk Alert';
+            u.badgeColor = '#ef4444'; // Red
+        }
+    });
+
+    const avgAccuracyRate = operatorList.length > 0 ? (100 - (avgDisputeRateSum / operatorList.length)).toFixed(1) + "%" : "100%";
+
+    // 4. Update KPI Cards
+    document.getElementById('user-kpi-active-users').textContent = operatorList.length;
+    document.getElementById('user-kpi-top-operator').textContent = operatorList.length > 0 ? operatorList[0].name : 'N/A';
+    document.getElementById('user-kpi-total-volume').textContent = totalVolumeCount.toLocaleString();
+    document.getElementById('user-kpi-avg-accuracy').textContent = avgAccuracyRate;
+
+    // 5. Populate Leaderboard Table
+    const tbody = document.getElementById('user-leaderboard-tbody');
+    tbody.innerHTML = '';
+
+    if (operatorList.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="padding: 24px; text-align: center; color: var(--text-muted);">No operator data found for this month filter.</td></tr>';
+    } else {
+        operatorList.forEach(u => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border-color)';
+            tr.style.transition = 'background-color 0.2s';
+            tr.style.cursor = 'pointer';
+            tr.addEventListener('mouseenter', () => tr.style.backgroundColor = 'rgba(99,102,241,0.06)');
+            tr.addEventListener('mouseleave', () => {
+                if (!tr.classList.contains('active-user-row')) tr.style.backgroundColor = '';
+            });
+            tr.addEventListener('click', () => {
+                // Remove previous active highlight
+                document.querySelectorAll('#user-leaderboard-tbody tr.active-user-row').forEach(r => {
+                    r.classList.remove('active-user-row');
+                    r.style.backgroundColor = '';
+                });
+                tr.classList.add('active-user-row');
+                tr.style.backgroundColor = 'rgba(99,102,241,0.1)';
+                showOperatorDailyLog(u);
+            });
+
+            // Compute tooltip descriptions
+            let specialtyDesc = '';
+            if (u.specialty === 'Generalist') {
+                specialtyDesc = 'Processes balanced volume across all marketplaces';
+            } else {
+                specialtyDesc = `Processes ${u.specialty.replace(' Pro', '')} invoices predominantly (>60% of total)`;
+            }
+
+            let gradeDesc = '';
+            if (u.badge.includes('Gold')) {
+                gradeDesc = 'Gold Star: High accuracy rate (Disputes <= 2%)';
+            } else if (u.badge.includes('Silver')) {
+                gradeDesc = 'Silver Star: Acceptable accuracy rate (Disputes 2.1% - 5%)';
+            } else {
+                gradeDesc = 'Risk Alert: Low accuracy rate (Disputes > 5%)';
+            }
+
+            tr.innerHTML = `
+                <td style="padding: 12px; text-align: center; font-weight: 700; color: ${u.rank === 1 ? '#eab308' : u.rank === 2 ? '#94a3b8' : u.rank === 3 ? '#cd7f32' : 'var(--text-color)'};">${u.rank <= 3 ? ['🥇','🥈','🥉'][u.rank-1] : u.rank}</td>
+                <td style="padding: 12px; font-weight: 600; color: var(--text-title);">${u.name}</td>
+                <td style="padding: 12px; text-align: right; font-weight: 700; color: #10b981;">₹${u.salesAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                <td style="padding: 12px; text-align: center; color: var(--text-color);">${u.salesCount}</td>
+                <td style="padding: 12px; text-align: right; font-weight: 600; color: #06b6d4;">₹${u.avgValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                <td style="padding: 12px; text-align: center; color: var(--text-muted);"><span style="font-weight: 600; color: ${u.disputes > 0 ? '#ef4444' : '#10b981'};">${u.disputes}</span> <span style="font-size: 11px;">(${u.disputeRate}%)</span></td>
+                <td style="padding: 12px; text-align: center;"><span title="${specialtyDesc}" style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid ${u.specialtyColor}40; color: ${u.specialtyColor}; background: ${u.specialtyColor}15; cursor: help;">${u.specialty}</span></td>
+                <td style="padding: 12px; text-align: center;"><span title="${gradeDesc}" style="display: inline-block; padding: 4px 8px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; background-color: rgba(255,255,255,0.05); color: ${u.badgeColor}; cursor: help;">${u.badge}</span></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // Populate Compare Dropdowns
+    const op1Select = document.getElementById('compare-op1-select');
+    const op2Select = document.getElementById('compare-op2-select');
+    if (op1Select && op2Select) {
+        const prev1 = op1Select.value;
+        const prev2 = op2Select.value;
+
+        op1Select.innerHTML = '';
+        op2Select.innerHTML = '';
+
+        operatorList.forEach((o, i) => {
+            const opt1 = document.createElement('option');
+            opt1.value = o.name;
+            opt1.textContent = o.name;
+            op1Select.appendChild(opt1);
+
+            const opt2 = document.createElement('option');
+            opt2.value = o.name;
+            opt2.textContent = o.name;
+            op2Select.appendChild(opt2);
+        });
+
+        // Restore selection or pick defaults
+        if (prev1 && operatorList.some(o => o.name === prev1)) {
+            op1Select.value = prev1;
+        } else if (operatorList.length > 0) {
+            op1Select.value = operatorList[0].name;
+        }
+
+        if (prev2 && operatorList.some(o => o.name === prev2)) {
+            op2Select.value = prev2;
+        } else if (operatorList.length > 1) {
+            op2Select.value = operatorList[1].name;
+        }
+    }
+
+    // Wire compare action
+    const compareBtn = document.getElementById('btn-compare-operators');
+    if (compareBtn && !compareBtn.dataset.wired) {
+        compareBtn.dataset.wired = 'true';
+        compareBtn.onclick = () => {
+            const opName1 = document.getElementById('compare-op1-select')?.value;
+            const opName2 = document.getElementById('compare-op2-select')?.value;
+            if (!opName1 || !opName2) return;
+
+            const u1 = operatorList.find(o => o.name === opName1);
+            const u2 = operatorList.find(o => o.name === opName2);
+            if (!u1 || !u2) return;
+
+            const resultsContainer = document.getElementById('compare-results-container');
+            if (resultsContainer) resultsContainer.classList.remove('hidden');
+
+            const makeCompareCard = (u, isWinnerMap) => {
+                return `
+                    <div style="text-align: center; margin-bottom: 12px;">
+                        <h4 style="font-size: 16px; font-weight: 700; color: var(--text-title); margin: 0 0 4px 0;">${u.name}</h4>
+                        <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: ${u.specialtyColor}15; color: ${u.specialtyColor};">${u.specialty}</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Sales Processed:</span>
+                            <strong style="color: #10b981; font-weight: 700;">₹${Math.round(u.salesAmount).toLocaleString()} ${isWinnerMap.salesAmount ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Invoices Processed:</span>
+                            <strong style="color: var(--text-title); font-weight: 700;">${u.salesCount.toLocaleString()} ${isWinnerMap.salesCount ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Average Invoice Value:</span>
+                            <strong style="color: #06b6d4; font-weight: 700;">₹${Math.round(u.avgValue).toLocaleString()} ${isWinnerMap.avgValue ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Returns Handled:</span>
+                            <strong style="color: var(--text-title); font-weight: 700;">${u.returnCount.toLocaleString()} ${isWinnerMap.returnCount ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Disputes Rate:</span>
+                            <strong style="color: ${u.disputeRate > 5 ? '#ef4444' : '#10b981'}; font-weight: 700;">${u.disputes} (${u.disputeRate}%) ${isWinnerMap.disputeRate ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0;">
+                            <span style="color: var(--text-muted);">Accuracy Rate:</span>
+                            <strong style="color: ${u.accuracyRate < 95 ? '#ef4444' : '#10b981'}; font-weight: 700;">${u.accuracyRate}% ${isWinnerMap.accuracyRate ? '🏆' : ''}</strong>
+                        </div>
+                    </div>
+                `;
+            };
+
+            const isWinner1 = {
+                salesAmount: u1.salesAmount > u2.salesAmount,
+                salesCount: u1.salesCount > u2.salesCount,
+                avgValue: u1.avgValue > u2.avgValue,
+                returnCount: u1.returnCount > u2.returnCount,
+                disputeRate: u1.disputeRate < u2.disputeRate,
+                accuracyRate: u1.accuracyRate > u2.accuracyRate
+            };
+
+            const isWinner2 = {
+                salesAmount: u2.salesAmount > u1.salesAmount,
+                salesCount: u2.salesCount > u1.salesCount,
+                avgValue: u2.avgValue > u1.avgValue,
+                returnCount: u2.returnCount > u1.returnCount,
+                disputeRate: u2.disputeRate < u1.disputeRate,
+                accuracyRate: u2.accuracyRate > u1.accuracyRate
+            };
+
+            document.getElementById('compare-card-op1').innerHTML = makeCompareCard(u1, isWinner1);
+            document.getElementById('compare-card-op2').innerHTML = makeCompareCard(u2, isWinner2);
+        };
+    }
+
+    // Hide user details panel when month filter changes
+    const detailsPanel = document.getElementById('user-details-panel');
+    if (detailsPanel) detailsPanel.classList.add('hidden');
+
+    // 6. Draw ApexCharts
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDark ? '#94a3b8' : '#64748b';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+    const tooltipTheme = isDark ? 'dark' : 'light';
+
+    // Chart 1: Donut (Workload Share)
+    const opNames = operatorList.map(o => o.name);
+    const opSalesCount = operatorList.map(o => o.salesCount);
+
+    const volumeShareOptions = {
+        chart: { type: 'donut', height: 280, width: '100%', background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        labels: opNames,
+        series: opSalesCount,
+        colors: ['#10b981', '#6366f1', '#f43f5e', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899'],
+        legend: { position: 'bottom', labels: { colors: textColor } },
+        tooltip: { theme: tooltipTheme },
+        dataLabels: { enabled: true, formatter: (val) => val.toFixed(1) + "%" },
+        plotOptions: { pie: { donut: { size: '60%' } } }
+    };
+    renderOrUpdateChart('user-chart-volume-share', 'userVolumeShare', volumeShareOptions);
+
+    // Chart 2: Stacked Horizontal Bar (Platform Share)
+    const opAmz = operatorList.map(o => o.platforms.amz);
+    const opAjio = operatorList.map(o => o.platforms.ajio);
+    const opMyn = operatorList.map(o => o.platforms.myn);
+    const opFk = operatorList.map(o => o.platforms.fk);
+
+    const platformShareOptions = {
+        chart: { type: 'bar', height: 280, width: '100%', stacked: true, toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#ff9900', '#10b981', '#f43f5e', '#0083ca'], // Amazon Orange, Ajio Green, Myntra Pink, Flipkart Blue
+        grid: { borderColor: gridColor },
+        plotOptions: { bar: { horizontal: true, barHeight: '55%', borderRadius: 4 } },
+        xaxis: { categories: opNames, labels: { style: { colors: textColor } } },
+        yaxis: { labels: { style: { colors: textColor } } },
+        legend: { position: 'bottom', labels: { colors: textColor } },
+        tooltip: { theme: tooltipTheme },
+        series: [
+            { name: 'Amazon', data: opAmz },
+            { name: 'Ajio', data: opAjio },
+            { name: 'Myntra', data: opMyn },
+            { name: 'Flipkart', data: opFk }
+        ]
+    };
+    renderOrUpdateChart('user-chart-platform-share', 'userPlatformShare', platformShareOptions);
+
+    // 5b. Compute and Draw Team Daily Productivity Trend
+    const teamDaily = {};
+    operatorList.forEach(u => {
+        if (u.dailyLog) {
+            Object.entries(u.dailyLog).forEach(([dateKey, dayData]) => {
+                if (!teamDaily[dateKey]) {
+                    teamDaily[dateKey] = 0;
+                }
+                teamDaily[dateKey] += dayData.invoices;
+            });
+        }
+    });
+
+    // Sort dates
+    const teamDailySorted = Object.entries(teamDaily)
+        .map(([dateKey, invoices]) => {
+            const [d, m, y] = dateKey.split('-');
+            return {
+                dateKey,
+                invoices,
+                sortDate: new Date(parseInt(y), parseInt(m) - 1, parseInt(d))
+            };
+        })
+        .sort((a, b) => a.sortDate - b.sortDate);
+
+    const teamDailyDates = teamDailySorted.map(item => item.dateKey);
+    const teamDailyInvoices = teamDailySorted.map(item => item.invoices);
+
+    const teamTrendOptions = {
+        chart: { 
+            type: 'area', 
+            height: 280, 
+            width: '100%', 
+            toolbar: { show: false }, 
+            background: 'transparent', 
+            fontFamily: 'Inter, sans-serif' 
+        },
+        colors: ['#6366f1'],
+        stroke: { curve: 'smooth', width: 2 },
+        fill: {
+            type: 'gradient',
+            gradient: {
+                shadeIntensity: 1,
+                opacityFrom: 0.35,
+                opacityTo: 0.05,
+                stops: [0, 90, 100]
+            }
+        },
+        grid: { borderColor: gridColor },
+        xaxis: { 
+            categories: teamDailyDates, 
+            labels: { style: { colors: textColor } } 
+        },
+        yaxis: { 
+            labels: { style: { colors: textColor } }
+        },
+        tooltip: { theme: tooltipTheme },
+        dataLabels: { enabled: false },
+        series: [
+            { name: 'Total Team Invoices', data: teamDailyInvoices }
+        ]
+    };
+    renderOrUpdateChart('user-chart-team-productivity-trend', 'teamDailyTrend', teamTrendOptions);
+
+    // Redraw Lucide Icons in KPI cards
+    if (window.lucide) {
+        lucide.createIcons();
+    }
+
+    // Close button for user details panel
+    const closeBtn = document.getElementById('btn-close-user-details');
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            const dp = document.getElementById('user-details-panel');
+            if (dp) dp.classList.add('hidden');
+            document.querySelectorAll('#user-leaderboard-tbody tr.active-user-row').forEach(r => {
+                r.classList.remove('active-user-row');
+                r.style.backgroundColor = '';
+            });
+        };
+    }
+}
+
+/**
+ * Shows the daily activity log panel for the selected operator
+ */
+function showOperatorDailyLog(userData) {
+    const panel = document.getElementById('user-details-panel');
+    if (!panel) return;
+    panel.classList.remove('hidden');
+
+    // Set operator name
+    document.getElementById('user-details-selected-name').textContent = userData.name;
+
+    // Reset date filter input
+    const dateFilterInput = document.getElementById('user-details-date-filter');
+    const clearFilterBtn = document.getElementById('btn-clear-date-filter');
+    if (dateFilterInput) dateFilterInput.value = '';
+    if (clearFilterBtn) clearFilterBtn.style.display = 'none';
+
+    // Build sorted daily entries
+    const dailyEntries = Object.entries(userData.dailyLog)
+        .map(([dateKey, data]) => ({
+            dateKey,
+            ...data,
+            // Parse for sorting: DD-MM-YYYY -> Date
+            sortDate: (() => {
+                const [d, m, y] = dateKey.split('-');
+                return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+            })()
+        }))
+        .sort((a, b) => a.sortDate - b.sortDate);
+
+    // Compute KPIs
+    const totalDays = dailyEntries.length || 1;
+    const totalInvoices = dailyEntries.reduce((s, e) => s + e.invoices, 0);
+    const dailyAvg = (totalInvoices / totalDays).toFixed(1);
+    const maxDay = dailyEntries.reduce((m, e) => Math.max(m, e.invoices), 0);
+    const avgVal = userData.salesCount > 0 ? '₹' + Math.round(userData.salesAmount / userData.salesCount).toLocaleString() : '₹0';
+    const accuracy = userData.accuracyRate !== undefined ? userData.accuracyRate.toFixed(1) + '%' : '100%';
+
+    document.getElementById('user-detail-kpi-daily-avg').textContent = dailyAvg;
+    document.getElementById('user-detail-kpi-max-day').textContent = maxDay;
+    document.getElementById('user-detail-kpi-avg-val').textContent = avgVal;
+    document.getElementById('user-detail-kpi-accuracy').textContent = accuracy;
+
+    // Set platform breakdown details (Transactions count, Sales total, Purchases total, Returns total & count)
+    const setPlatformBreakdown = (key) => {
+        const count = userData.platforms[key] || 0;
+        const sale = userData.platformSales[key] || 0;
+        const purchase = userData.platformPurchases[key] || 0;
+        const retCount = userData.platformReturnsCount[key] || 0;
+        const retAmt = userData.platformReturnsAmount[key] || 0;
+        const saleQty = userData.platformSalesQty[key] || 0;
+        const purchaseQty = userData.platformPurchasesQty[key] || 0;
+        
+        document.getElementById(`user-platform-count-${key}`).textContent = `${count} Transaction${count !== 1 ? 's' : ''}`;
+        document.getElementById(`user-platform-sale-${key}`).textContent = '₹' + Math.round(sale).toLocaleString() + ` (${saleQty} Qty)`;
+        document.getElementById(`user-platform-purchase-${key}`).textContent = '₹' + Math.round(purchase).toLocaleString() + ` (${purchaseQty} Qty)`;
+        document.getElementById(`user-platform-returns-${key}`).textContent = `₹${Math.round(retAmt).toLocaleString()} (${retCount})`;
+    };
+    
+    ['amz', 'ajio', 'myn', 'fk'].forEach(setPlatformBreakdown);
+
+    // Render function for daily log table & trend chart
+    const renderDailyLogData = (entriesToRender) => {
+        // Populate daily log table
+        const tbody = document.getElementById('user-details-daily-tbody');
+        tbody.innerHTML = '';
+        if (entriesToRender.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--text-muted);">No daily data matching filter.</td></tr>';
+        } else {
+            entriesToRender.forEach(entry => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid var(--border-color)';
+                tr.style.cursor = 'pointer';
+                tr.className = 'daily-log-row';
+                tr.style.transition = 'background-color 0.15s';
+                
+                // Highlight high-output days
+                const isHighDay = entry.invoices >= maxDay * 0.8 && maxDay > 0;
+                tr.innerHTML = `
+                    <td style="padding: 10px; font-size: 13px; color: var(--text-color); display: flex; align-items: center; gap: 6px; user-select: none;">
+                        <i data-lucide="chevron-right" class="row-arrow" style="width: 14px; height: 14px; transition: transform 0.2s; color: var(--text-muted);"></i>
+                        ${entry.dateKey}
+                    </td>
+                    <td style="padding: 10px; text-align: center; font-weight: 700; color: ${isHighDay ? '#10b981' : 'var(--text-title)'};">${entry.invoices.toLocaleString()}${isHighDay ? ' 🔥' : ''}</td>
+                    <td style="padding: 10px; text-align: right; font-size: 13px; color: var(--text-color);">₹${entry.amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 13px; color: ${entry.disputes > 0 ? '#ef4444' : 'var(--text-muted)'};">${entry.disputes}</td>
+                `;
+                tbody.appendChild(tr);
+
+                // Expandable sub-row details containing platform specific breakdown
+                const detailTr = document.createElement('tr');
+                detailTr.className = 'daily-detail-row hidden';
+                detailTr.style.background = 'rgba(0, 0, 0, 0.12)';
+                detailTr.style.borderBottom = '1px solid var(--border-color)';
+                
+                const platformLabels = { amz: 'Amazon', ajio: 'Ajio', myn: 'Myntra', fk: 'Flipkart' };
+                const platformColors = { amz: '#ff9900', ajio: '#10b981', myn: '#f43f5e', fk: '#0083ca' };
+                
+                let detailCardsHtml = '';
+                for (const pk of ['amz', 'ajio', 'myn', 'fk']) {
+                    const info = entry.platforms[pk];
+                    if (info.invoices > 0 || info.returns > 0) {
+                        detailCardsHtml += `
+                            <div style="flex: 1; min-width: 155px; padding: 8px 12px; background: rgba(255, 255, 255, 0.015); border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+                                <span style="font-size: 11px; font-weight: 700; color: ${platformColors[pk]}; border-bottom: 1px solid ${platformColors[pk]}25; padding-bottom: 4px; display: block; margin-bottom: 6px;">${platformLabels[pk]}</span>
+                                <div style="font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px;">
+                                    <div style="display: flex; justify-content: space-between; gap: 8px;"><span>Invoices:</span><strong style="color: var(--text-color);">${info.invoices}</strong></div>
+                                    <div style="display: flex; justify-content: space-between; gap: 8px;"><span>Sale:</span><strong style="color: #10b981;">₹${Math.round(info.sale).toLocaleString()} (${info.saleQty} Qty)</strong></div>
+                                    <div style="display: flex; justify-content: space-between; gap: 8px;"><span>Purchase:</span><strong style="color: #06b6d4;">₹${Math.round(info.purchase).toLocaleString()} (${info.purchaseQty} Qty)</strong></div>
+                                    ${info.returns > 0 ? `<div style="display: flex; justify-content: space-between; gap: 8px;"><span>CN/DN:</span><strong style="color: #ef4444;">₹${Math.round(info.returnAmt).toLocaleString()} (${info.returns})</strong></div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+
+                detailTr.innerHTML = `
+                    <td colspan="4" style="padding: 10px 14px;">
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                            ${detailCardsHtml || '<div style="font-size: 11px; color: var(--text-muted);">No platform details recorded for this date.</div>'}
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(detailTr);
+
+                // Row toggle click handler
+                tr.onclick = () => {
+                    const wasHidden = detailTr.classList.contains('hidden');
+                    
+                    // Close other details to keep layout clean
+                    tbody.querySelectorAll('.daily-detail-row').forEach(r => r.classList.add('hidden'));
+                    tbody.querySelectorAll('.daily-log-row i.row-arrow').forEach(a => a.style.transform = 'rotate(0deg)');
+                    tbody.querySelectorAll('.daily-log-row').forEach(r => r.style.backgroundColor = '');
+
+                    if (wasHidden) {
+                        detailTr.classList.remove('hidden');
+                        tr.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+                        const arrow = tr.querySelector('i.row-arrow');
+                        if (arrow) arrow.style.transform = 'rotate(90deg)';
+                    }
+                };
+            });
+            // Re-render arrow icons
+            if (window.lucide) lucide.createIcons();
+        }
+
+        // Draw daily trend line chart
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const textColor = isDark ? '#94a3b8' : '#64748b';
+        const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+        const tooltipTheme = isDark ? 'dark' : 'light';
+
+        const categories = entriesToRender.map(e => e.dateKey);
+        const invoiceSeries = entriesToRender.map(e => e.invoices);
+        const amountSeries = entriesToRender.map(e => Math.round(e.amount));
+
+        const trendOptions = {
+            chart: {
+                type: 'area',
+                height: 250,
+                width: '100%',
+                background: 'transparent',
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false },
+                zoom: { enabled: false }
+            },
+            dataLabels: {
+                enabled: false // Disable data label boxes on the chart lines to avoid clutter
+            },
+            colors: ['#6366f1', '#10b981'],
+            stroke: { width: [3, 2], curve: 'smooth' },
+            markers: {
+                size: entriesToRender.length <= 3 ? 6 : 4,
+                strokeWidth: 2,
+                hover: { size: 7 }
+            },
+            fill: {
+                type: 'gradient',
+                gradient: { shadeIntensity: 1, opacityFrom: 0.35, opacityTo: 0.05, stops: [0, 100] }
+            },
+            grid: { borderColor: gridColor, strokeDashArray: 3 },
+            xaxis: {
+                categories: categories,
+                labels: {
+                    style: { colors: textColor, fontSize: '10px' },
+                    rotate: -45,
+                    rotateAlways: categories.length > 8
+                },
+                axisBorder: { show: false }
+            },
+            yaxis: [
+                {
+                    min: 0,
+                    forceNiceScale: true,
+                    title: { text: 'Invoices', style: { color: textColor, fontSize: '11px' } },
+                    labels: { style: { colors: textColor }, formatter: (v) => Math.round(v).toLocaleString() }
+                },
+                {
+                    min: 0,
+                    opposite: true,
+                    forceNiceScale: true,
+                    title: { text: 'Amount (₹)', style: { color: textColor, fontSize: '11px' } },
+                    labels: { style: { colors: textColor }, formatter: (v) => '₹' + formatNumberCompact(v) }
+                }
+            ],
+            legend: { position: 'top', labels: { colors: textColor } },
+            tooltip: {
+                theme: tooltipTheme,
+                y: {
+                    formatter: function(val, opts) {
+                        if (opts.seriesIndex === 1) return '₹' + val.toLocaleString();
+                        return val + ' invoices';
+                    }
+                }
+            },
+            series: [
+                { name: 'Invoices', type: 'area', data: invoiceSeries },
+                { name: 'Amount', type: 'line', data: amountSeries }
+            ]
+        };
+
+        renderOrUpdateChart('user-chart-daily-trend', 'userDailyTrend', trendOptions);
+    };
+
+    // Render initial data
+    renderDailyLogData(dailyEntries);
+
+    // Wire date picker change event
+    if (dateFilterInput) {
+        dateFilterInput.onchange = (e) => {
+            const val = e.target.value; // YYYY-MM-DD
+            if (val) {
+                const [y, m, d] = val.split('-');
+                const targetKey = `${d}-${m}-${y}`;
+                const filtered = dailyEntries.filter(entry => entry.dateKey === targetKey);
+                renderDailyLogData(filtered);
+                if (clearFilterBtn) clearFilterBtn.style.display = 'inline-block';
+            } else {
+                renderDailyLogData(dailyEntries);
+                if (clearFilterBtn) clearFilterBtn.style.display = 'none';
+            }
+        };
+
+        // Browser handles native date input click to open calendar.
+        // The wrapper div onclick in HTML also calls showPicker() if supported.
+    }
+
+    // Wire clear filter button
+    if (clearFilterBtn) {
+        clearFilterBtn.onclick = () => {
+            if (dateFilterInput) dateFilterInput.value = '';
+            clearFilterBtn.style.display = 'none';
+            renderDailyLogData(dailyEntries);
+        };
+    }
+
+    // Scroll to details panel
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // Redraw Lucide icons
+    if (window.lucide) lucide.createIcons();
+
+    // Wire Export Scorecard button
+    const exportBtn = document.getElementById('btn-export-scorecard');
+    if (exportBtn) {
+        exportBtn.onclick = () => exportOperatorScorecard(userData, dailyEntries);
+    }
+}
+
+/**
+ * Exports a beautifully formatted operator scorecard as a printable HTML page
+ */
+function exportOperatorScorecard(userData, dailyEntries) {
+    const selectedMonth = document.getElementById('user-month-filter')?.value || 'ALL';
+    const periodLabel = selectedMonth === 'ALL' ? 'All Months' : selectedMonth;
+    const now = new Date();
+    const generatedDate = now.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    // Compute stats
+    const totalDays = dailyEntries.length || 1;
+    const totalInvoices = dailyEntries.reduce((s, e) => s + e.invoices, 0);
+    const totalAmount = dailyEntries.reduce((s, e) => s + e.amount, 0);
+    const totalDisputes = dailyEntries.reduce((s, e) => s + e.disputes, 0);
+    const dailyAvg = (totalInvoices / totalDays).toFixed(1);
+    const maxDay = dailyEntries.reduce((m, e) => Math.max(m, e.invoices), 0);
+    const avgValue = userData.salesCount > 0 ? Math.round(userData.salesAmount / userData.salesCount) : 0;
+    const accuracy = userData.accuracyRate !== undefined ? userData.accuracyRate.toFixed(1) : '100.0';
+    const totalPurchases = Object.values(userData.platformPurchases).reduce((sum, val) => sum + val, 0);
+
+    // Platform breakdown
+    const platformLabels = { amz: 'Amazon', ajio: 'Ajio', myn: 'Myntra', fk: 'Flipkart' };
+    const platformColors = { amz: '#ff9900', ajio: '#10b981', myn: '#f43f5e', fk: '#0083ca' };
+    const totalPlatformTx = userData.platforms.amz + userData.platforms.ajio + userData.platforms.myn + userData.platforms.fk;
+
+    // Build daily rows HTML
+    let dailyRowsHtml = '';
+    dailyEntries.forEach((entry, idx) => {
+        const bgColor = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
+        dailyRowsHtml += `
+            <tr style="background: ${bgColor};">
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px;">${entry.dateKey}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #1e293b;">${entry.invoices}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-size: 13px;">₹${entry.amount.toLocaleString()}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: center; color: ${entry.disputes > 0 ? '#ef4444' : '#94a3b8'};">${entry.disputes}</td>
+            </tr>
+        `;
+    });
+
+    // Build platform breakdown
+    let platformHtml = '';
+    for (const pk of ['amz', 'ajio', 'myn', 'fk']) {
+        const count = userData.platforms[pk];
+        const sale = userData.platformSales[pk] || 0;
+        const purchase = userData.platformPurchases[pk] || 0;
+        const retCount = userData.platformReturnsCount[pk] || 0;
+        const retAmt = userData.platformReturnsAmount[pk] || 0;
+        const pct = totalPlatformTx > 0 ? ((count / totalPlatformTx) * 100).toFixed(1) : '0.0';
+        platformHtml += `
+            <div style="margin-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+                    <div style="width: 10px; height: 10px; border-radius: 50%; background: ${platformColors[pk]};"></div>
+                    <span style="font-weight: 700; width: 70px; font-size: 13px;">${platformLabels[pk]}</span>
+                    <div style="flex: 1; background: #e2e8f0; border-radius: 8px; height: 8px; overflow: hidden;">
+                        <div style="height: 100%; width: ${pct}%; background: ${platformColors[pk]}; border-radius: 8px;"></div>
+                    </div>
+                    <span style="font-size: 12px; color: #64748b; font-weight: 600; text-align: right; min-width: 80px;">${count} Tx (${pct}%)</span>
+                </div>
+                <div style="display: flex; gap: 12px; margin-left: 22px; font-size: 11px; color: #64748b;">
+                    <span>Sale: <strong>₹${Math.round(sale).toLocaleString()}</strong></span>
+                    <span>Purchase: <strong>₹${Math.round(purchase).toLocaleString()}</strong></span>
+                    <span>CN/DN: <strong>₹${Math.round(retAmt).toLocaleString()} (${retCount})</strong></span>
+                </div>
+            </div>
+        `;
+    }
+
+    const scorecardHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Scorecard - ${userData.name} | ${periodLabel}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: 'Inter', sans-serif; background: #fff; color: #1e293b; padding: 32px; }
+            @media print {
+                body { padding: 16px; }
+                .no-print { display: none !important; }
+                @page { margin: 12mm; size: A4; }
+            }
+        </style>
+    </head>
+    <body>
+        <div style="max-width: 800px; margin: 0 auto;">
+            <!-- Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #6366f1; padding-bottom: 16px; margin-bottom: 24px;">
+                <div>
+                    <h1 style="font-size: 24px; font-weight: 800; color: #1e293b;">Operator Performance Scorecard</h1>
+                    <p style="font-size: 14px; color: #64748b; margin-top: 4px;">Generated on ${generatedDate}</p>
+                </div>
+                <div style="text-align: right;">
+                    <p style="font-size: 12px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Period</p>
+                    <p style="font-size: 16px; font-weight: 700; color: #6366f1;">${periodLabel}</p>
+                </div>
+            </div>
+
+            <!-- Operator Name & Grade -->
+            <div style="display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #f0f0ff, #f8f8ff); border: 1px solid #e0e0f0; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px;">
+                <div>
+                    <p style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600; letter-spacing: 1px;">Operator Name</p>
+                    <h2 style="font-size: 28px; font-weight: 800; color: #1e293b;">${userData.name}</h2>
+                    <p style="font-size: 13px; color: #64748b; margin-top: 4px;">Rank #${userData.rank} • ${userData.specialty} • Grade ${userData.grade}</p>
+                </div>
+                <div style="text-align: center; padding: 12px 20px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+                    <p style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Accuracy</p>
+                    <p style="font-size: 32px; font-weight: 800; color: ${parseFloat(accuracy) >= 95 ? '#10b981' : parseFloat(accuracy) >= 90 ? '#f59e0b' : '#ef4444'};">${accuracy}%</p>
+                </div>
+            </div>
+
+            <!-- KPI Grid -->
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px;">
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Total Invoices</p>
+                    <p style="font-size: 20px; font-weight: 800; color: #1e293b; margin-top: 4px;">${userData.salesCount.toLocaleString()}</p>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Sales Amount</p>
+                    <p style="font-size: 20px; font-weight: 800; color: #10b981; margin-top: 4px;">₹${userData.salesAmount.toLocaleString()}</p>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Purchase Amount</p>
+                    <p style="font-size: 20px; font-weight: 800; color: #3b82f6; margin-top: 4px;">₹${totalPurchases.toLocaleString()}</p>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Avg/Invoice</p>
+                    <p style="font-size: 20px; font-weight: 800; color: #06b6d4; margin-top: 4px;">₹${avgValue.toLocaleString()}</p>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Daily Avg</p>
+                    <p style="font-size: 20px; font-weight: 800; color: #6366f1; margin-top: 4px;">${dailyAvg}</p>
+                </div>
+            </div>
+
+            <!-- Summary Stats -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px;">
+                    <h3 style="font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">📊 Performance Summary</h3>
+                    <table style="width: 100%; font-size: 13px;">
+                        <tr><td style="padding: 4px 0; color: #64748b;">Active Days</td><td style="text-align: right; font-weight: 600;">${totalDays}</td></tr>
+                        <tr><td style="padding: 4px 0; color: #64748b;">Max Daily Output</td><td style="text-align: right; font-weight: 600;">${maxDay} invoices</td></tr>
+                        <tr><td style="padding: 4px 0; color: #64748b;">Returns Processed</td><td style="text-align: right; font-weight: 600;">${userData.returnCount}</td></tr>
+                        <tr><td style="padding: 4px 0; color: #64748b;">Disputes</td><td style="text-align: right; font-weight: 600; color: ${userData.disputes > 0 ? '#ef4444' : '#10b981'};">${userData.disputes} (${userData.disputeRate}%)</td></tr>
+                    </table>
+                </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px;">
+                    <h3 style="font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">🏢 Platform Breakdown</h3>
+                    ${platformHtml}
+                </div>
+            </div>
+
+            <!-- Daily Log Table -->
+            <div style="margin-bottom: 24px;">
+                <h3 style="font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">📅 Daily Activity Log</h3>
+                <table style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+                    <thead>
+                        <tr style="background: #f1f5f9;">
+                            <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Date</th>
+                            <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Invoices</th>
+                            <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Amount</th>
+                            <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Disputes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${dailyRowsHtml || '<tr><td colspan="4" style="padding: 16px; text-align: center; color: #94a3b8;">No daily data available</td></tr>'}
+                    </tbody>
+                    <tfoot>
+                        <tr style="background: #f1f5f9; font-weight: 700;">
+                            <td style="padding: 10px 12px; border-top: 2px solid #e2e8f0;">TOTAL</td>
+                            <td style="padding: 10px 12px; text-align: center; border-top: 2px solid #e2e8f0;">${totalInvoices}</td>
+                            <td style="padding: 10px 12px; text-align: right; border-top: 2px solid #e2e8f0;">₹${totalAmount.toLocaleString()}</td>
+                            <td style="padding: 10px 12px; text-align: center; border-top: 2px solid #e2e8f0; color: ${totalDisputes > 0 ? '#ef4444' : '#10b981'};">${totalDisputes}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <!-- Footer -->
+            <div style="text-align: center; padding-top: 16px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 11px;">
+                <p>Auto-generated by Invoice Data Center • ${generatedDate}</p>
+            </div>
+
+            <!-- Print Button (hidden on print) -->
+            <div class="no-print" style="text-align: center; margin-top: 24px;">
+                <button onclick="window.print()" style="padding: 10px 24px; background: #6366f1; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;">
+                    🖨️ Print / Save as PDF
+                </button>
+            </div>
+        </div>
+    </body>
+    </html>`;
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(scorecardHtml);
+    printWindow.document.close();
 }
 

@@ -16,20 +16,209 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="app-container full-page">
-        <!-- Main Workspace -->
-        <main class="main-content">
-            <!-- Header bar with Logo and Controls -->
-            <header class="top-header">
-                <div class="logo-and-title">
-                    <div class="logo-icon">
-                        <img src="icon.png" alt="Logo" class="logo-img">
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar collapsed">
+            <div class="sidebar-brand-wrapper">
+                <div class="logo-icon">
+                    <img src="icon.png" alt="Logo" class="logo-img">
+                </div>
+                <span class="logo-text">BillReturn Sync</span>
+            </div>
+
+            <nav class="sidebar-menu">
+                <!-- Section 1: Invoices -->
+                <div class="sidebar-group active" data-mode="invoices">
+                    <div class="sidebar-group-header">
+                        <i data-lucide="receipt" class="sidebar-icon-svg" style="color: #6366f1; width: 20px; height: 20px; flex-shrink: 0; margin-right: 12px; transition: transform 0.2s ease;"></i>
+                        <span class="sidebar-group-title">Invoice Database</span>
+                        <i data-lucide="chevron-down" class="chevron-arrow" style="width: 14px; height: 14px; margin-left: auto;"></i>
                     </div>
-                    <div class="header-title">
-                        <div class="logo-brand">
-                            <h1>BillReturn Sync</h1>
+                    <div class="sidebar-group-items">
+                        <!-- Amazon -->
+                        <div class="sidebar-platform-row" data-tab="AMAZON">
+                            <span class="platform-label">Amazon</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="data" data-tab="AMAZON" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="chart" data-tab="AMAZON" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Ajio -->
+                        <div class="sidebar-platform-row" data-tab="AJIO">
+                            <span class="platform-label">Ajio</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="data" data-tab="AJIO" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="chart" data-tab="AJIO" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Myntra -->
+                        <div class="sidebar-platform-row" data-tab="MYNTRA">
+                            <span class="platform-label">Myntra</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="data" data-tab="MYNTRA" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="chart" data-tab="MYNTRA" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Flipkart -->
+                        <div class="sidebar-platform-row" data-tab="FLIPKART">
+                            <span class="platform-label">Flipkart</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="data" data-tab="FLIPKART" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="invoices" data-view="chart" data-tab="FLIPKART" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Section 2: Returns -->
+                <div class="sidebar-group" data-mode="returns">
+                    <div class="sidebar-group-header">
+                        <i data-lucide="undo-2" class="sidebar-icon-svg" style="color: #f43f5e; width: 20px; height: 20px; flex-shrink: 0; margin-right: 12px; transition: transform 0.2s ease;"></i>
+                        <span class="sidebar-group-title">Return Database</span>
+                        <i data-lucide="chevron-down" class="chevron-arrow" style="width: 14px; height: 14px; margin-left: auto;"></i>
+                    </div>
+                    <div class="sidebar-group-items">
+                        <!-- Amazon Return -->
+                        <div class="sidebar-platform-row" data-tab="AMAZON RETURN">
+                            <span class="platform-label">Amazon</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="data" data-tab="AMAZON RETURN" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="chart" data-tab="AMAZON RETURN" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Ajio Return -->
+                        <div class="sidebar-platform-row" data-tab="AJIO RETURN">
+                            <span class="platform-label">Ajio</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="data" data-tab="AJIO RETURN" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="chart" data-tab="AJIO RETURN" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Myntra Return -->
+                        <div class="sidebar-platform-row" data-tab="MYNTRA RETURN">
+                            <span class="platform-label">Myntra</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="data" data-tab="MYNTRA RETURN" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="chart" data-tab="MYNTRA RETURN" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Flipkart Return -->
+                        <div class="sidebar-platform-row" data-tab="FLIPKART RETURN">
+                            <span class="platform-label">Flipkart</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="data" data-tab="FLIPKART RETURN" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                                <button class="sidebar-view-btn" data-mode="returns" data-view="chart" data-tab="FLIPKART RETURN" title="Chart View">
+                                    <i data-lucide="bar-chart-2" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 3: Monthly -->
+                <div class="sidebar-group" data-mode="monthly">
+                    <div class="sidebar-group-header">
+                        <i data-lucide="calendar" class="sidebar-icon-svg" style="color: #06b6d4; width: 20px; height: 20px; flex-shrink: 0; margin-right: 12px; transition: transform 0.2s ease;"></i>
+                        <span class="sidebar-group-title">Monthly Database</span>
+                        <i data-lucide="chevron-down" class="chevron-arrow" style="width: 14px; height: 14px; margin-left: auto;"></i>
+                    </div>
+                    <div class="sidebar-group-items">
+                        <!-- All Report -->
+                        <div class="sidebar-platform-row" data-tab="ALL REPORT">
+                            <span class="platform-label">All Report</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="monthly" data-view="data" data-tab="ALL REPORT" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Monthly Data -->
+                        <div class="sidebar-platform-row" data-tab="MONTHLY DATA">
+                            <span class="platform-label">Monthly Data</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="monthly" data-view="data" data-tab="MONTHLY DATA" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- All Return -->
+                        <div class="sidebar-platform-row" data-tab="ALL RETURN REPORT">
+                            <span class="platform-label">All Return</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="monthly" data-view="data" data-tab="ALL RETURN REPORT" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Monthly Return -->
+                        <div class="sidebar-platform-row" data-tab="MONTHLY RETURN DATA">
+                            <span class="platform-label">Monthly Return</span>
+                            <div class="platform-actions">
+                                <button class="sidebar-view-btn" data-mode="monthly" data-view="data" data-tab="MONTHLY RETURN DATA" title="Data View">
+                                    <i data-lucide="database" style="width: 12px; height: 12px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 4: Global Analysis -->
+                <div class="sidebar-group single-btn" data-mode="global" id="sidebar-global-btn">
+                    <div class="sidebar-group-header">
+                        <i data-lucide="globe" class="sidebar-icon-svg" style="color: #f59e0b; width: 20px; height: 20px; flex-shrink: 0; margin-right: 12px; transition: transform 0.2s ease;"></i>
+                        <span class="sidebar-group-title">Global Analysis</span>
+                    </div>
+                </div>
+
+                <!-- Section 5: User Analysis -->
+                <div class="sidebar-group single-btn" data-mode="user" id="sidebar-user-btn">
+                    <div class="sidebar-group-header">
+                        <i data-lucide="users" class="sidebar-icon-svg" style="color: #10b981; width: 20px; height: 20px; flex-shrink: 0; margin-right: 12px; transition: transform 0.2s ease;"></i>
+                        <span class="sidebar-group-title">User Analysis</span>
+                    </div>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Header bar with Controls -->
+            <header class="top-header">
+                <div class="header-breadcrumbs" style="display: flex; align-items: center; gap: 12px;">
+                    <button class="icon-btn" id="btn-toggle-sidebar" style="padding: 8px;" title="Toggle Sidebar">
+                        <i data-lucide="menu" style="width: 20px; height: 20px;"></i>
+                    </button>
+                    <h2 class="header-page-title" id="lbl-page-title">Invoice Database</h2>
                 </div>
                 
                 <div class="header-controls">
@@ -61,24 +250,6 @@
                     </button>
                 </div>
             </header>
-
-            <!-- Database Source Switcher (Invoices vs Returns vs Monthly) -->
-            <div class="db-switcher-container">
-                <button class="db-switch-btn active" id="db-switch-invoices">
-                    <img src="icon-invoice.png" alt="Invoice" class="db-switch-icon"> Invoice Database
-                </button>
-                <button class="db-switch-btn" id="db-switch-returns">
-                    <img src="icon-return.png" alt="Return" class="db-switch-icon"> Return Database
-                </button>
-                <button class="db-switch-btn" id="db-switch-monthly">
-                    <img src="icon-monthly.png" alt="Monthly" class="db-switch-icon"> Monthly Database
-                </button>
-            </div>
-
-            <!-- Dynamic Tab Bar (Renders sheet tabs) -->
-            <div class="tab-navigation-bar" id="tab-nav-container">
-                <!-- Dynamically loaded tabs go here -->
-            </div>
 
             <!-- Dashboard Analytics & Metrics Section -->
             <section class="metrics-grid" id="metrics-container">
@@ -206,6 +377,555 @@
                             <div class="chart-container">
                                 <div id="chart-share"></div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Global Consolidated Dashboard Container (For Monthly Database) -->
+            <section class="global-dashboard-card hidden" id="global-dashboard-section">
+                <div class="global-dashboard-header">
+                    <div style="display: flex; align-items: center; gap: 12px; flex-grow: 1;">
+                        <i data-lucide="globe"></i>
+                        <h2>Global Monthly Dashboard (Consolidated)</h2>
+                    </div>
+                    <div class="month-filter-container" style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 13px; color: var(--text-muted); font-weight: 500;">Filter Month:</span>
+                        <select id="global-month-filter" style="background-color: var(--bg-app); border: 1px solid var(--border-color); color: var(--text-title); padding: 6px 12px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; outline: none; transition: border-color 0.2s;">
+                            <option value="ALL">All Months</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Consolidated KPI Grid -->
+                <div class="global-kpis-grid">
+                    <div class="kpi-card-v2 blue-glow">
+                        <div class="kpi-icon-v2 blue-bg">
+                            <i data-lucide="indian-rupee"></i>
+                        </div>
+                        <div class="kpi-info-v2" style="display: flex; flex-direction: column; width: 100%;">
+                            <span class="kpi-label-v2">Gross Sales</span>
+                            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                                <h3 class="kpi-value-v2" id="global-kpi-sales" style="margin: 0;">₹0.00</h3>
+                                <span class="kpi-badge" id="global-kpi-sales-badge"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-v2 red-glow">
+                        <div class="kpi-icon-v2 red-bg">
+                            <i data-lucide="shopping-bag"></i>
+                        </div>
+                        <div class="kpi-info-v2" style="display: flex; flex-direction: column; width: 100%;">
+                            <span class="kpi-label-v2">Total Purchases</span>
+                            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                                <h3 class="kpi-value-v2" id="global-kpi-purchases" style="margin: 0;">₹0.00</h3>
+                                <span class="kpi-badge" id="global-kpi-purchases-badge"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-v2 emerald-glow">
+                        <div class="kpi-icon-v2 emerald-bg">
+                            <i data-lucide="trending-up"></i>
+                        </div>
+                        <div class="kpi-info-v2" style="display: flex; flex-direction: column; width: 100%;">
+                            <span class="kpi-label-v2">Net Margin</span>
+                            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                                <h3 class="kpi-value-v2" id="global-kpi-margin" style="margin: 0;">₹0.00</h3>
+                                <span class="kpi-badge" id="global-kpi-margin-badge"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-v2 orange-glow">
+                        <div class="kpi-icon-v2 orange-bg">
+                            <i data-lucide="refresh-ccw"></i>
+                        </div>
+                        <div class="kpi-info-v2" style="display: flex; flex-direction: column; width: 100%;">
+                            <span class="kpi-label-v2">Total Returns (CN/DN)</span>
+                            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                                <h3 class="kpi-value-v2" id="global-kpi-returns" style="margin: 0;">₹0.00</h3>
+                                <span class="kpi-badge" id="global-kpi-returns-badge"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-v2 violet-glow">
+                        <div class="kpi-icon-v2 violet-bg">
+                            <i data-lucide="wallet"></i>
+                        </div>
+                        <div class="kpi-info-v2" style="display: flex; flex-direction: column; width: 100%;">
+                            <span class="kpi-label-v2">Net Revenue</span>
+                            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                                <h3 class="kpi-value-v2" id="global-kpi-revenue" style="margin: 0;">₹0.00</h3>
+                                <span class="kpi-badge" id="global-kpi-revenue-badge"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-v2 amber-glow">
+                        <div class="kpi-icon-v2 amber-bg">
+                            <i data-lucide="alert-triangle"></i>
+                        </div>
+                        <div class="kpi-info-v2" style="display: flex; flex-direction: column; width: 100%;">
+                            <span class="kpi-label-v2">Total Disputes</span>
+                            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                                <h3 class="kpi-value-v2" id="global-kpi-disputes" style="margin: 0;">0</h3>
+                                <span class="kpi-badge" id="global-kpi-disputes-badge"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Navigation for Dashboard Categories -->
+                <div class="global-sub-nav">
+                    <button class="sub-nav-btn active" data-section="financials">
+                        <i data-lucide="trending-up" style="width: 14px; height: 14px;"></i> Financial Overview
+                    </button>
+                    <button class="sub-nav-btn" data-section="returns">
+                        <i data-lucide="refresh-ccw" style="width: 14px; height: 14px;"></i> Returns & Quality
+                    </button>
+                    <button class="sub-nav-btn" data-section="operations">
+                        <i data-lucide="users" style="width: 14px; height: 14px;"></i> Operations & Staff
+                    </button>
+                </div>
+
+                <!-- Section 1: Financials Grid -->
+                <div class="global-section-grid" id="global-section-financials">
+                    <div class="global-chart-wrapper double-col">
+                        <div class="global-chart-header">
+                            <h3>Consolidated Monthly Cashflow Trend (All Months)</h3>
+                        </div>
+                        <div id="global-chart-trend" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Sales Share by Marketplace (Filtered Month)</h3>
+                        </div>
+                        <div id="global-chart-sales-share" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Marketplace Sales Growth Trend (All Months)</h3>
+                        </div>
+                        <div id="global-chart-sales-growth" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Marketplace Purchase Growth Trend (All Months)</h3>
+                        </div>
+                        <div id="global-chart-purchases-growth" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Monthly Net Profit Trend (All Months)</h3>
+                        </div>
+                        <div id="global-chart-net-profit" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Marketplace Margin % (Filtered Month)</h3>
+                        </div>
+                        <div id="global-chart-platform-profitability" class="global-chart-container"></div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Returns Grid -->
+                <div class="global-section-grid hidden" id="global-section-returns">
+                    <div class="global-chart-wrapper double-col">
+                        <div class="global-chart-header">
+                            <h3>Return Rate % Trend per Marketplace (All Months)</h3>
+                        </div>
+                        <div id="global-chart-return-rate-trend" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Returns Share by Marketplace (Filtered Month)</h3>
+                        </div>
+                        <div id="global-chart-returns-share" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Return Qty vs CN Value Correlation (Filtered Month)</h3>
+                        </div>
+                        <div id="global-chart-return-correlation" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Vendor Return Contribution (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-vendor-returns" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Vendor Return Rate % (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-vendor-return-rate" class="global-chart-container"></div>
+                    </div>
+                </div>
+
+                <!-- Section 3: Operations & Staff Grid -->
+                <div class="global-section-grid hidden" id="global-section-operations">
+                    <div class="global-chart-wrapper double-col">
+                        <div class="global-chart-header">
+                            <h3>Operator Performance Leaderboard (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-user-leaderboard" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Disputes vs Clear (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-disputes" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Platform Dispute Rate % (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-platform-dispute-rate" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Top 5 Profit Vendors (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-vendors" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Operator Dispute Rate % (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-operator-dispute-rate" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Invoice Value Buckets (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-invoice-buckets" class="global-chart-container"></div>
+                    </div>
+                    <div class="global-chart-wrapper">
+                        <div class="global-chart-header">
+                            <h3>Top 5 Disputed Vendors (Last 3 Months)</h3>
+                        </div>
+                        <div id="global-chart-top-disputed-vendors" class="global-chart-container"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- User Performance Analysis Section -->
+            <section class="global-dashboard-card hidden" id="user-dashboard-section" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+                <div class="global-dashboard-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                    <div class="global-dashboard-title" style="display: flex; align-items: center; gap: 12px;">
+                        <i data-lucide="users" style="width: 24px; height: 24px; color: #10b981;"></i>
+                        <h2 style="font-size: 20px; font-weight: 700; color: var(--text-title); margin: 0;">User Performance & Leaderboard</h2>
+                    </div>
+                    
+                    <div class="global-dashboard-filters" style="display: flex; gap: 12px; align-items: center;">
+                        <select id="user-month-filter" class="form-select-settings" style="padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background-color: var(--bg-card); color: var(--text-color); cursor: pointer;"></select>
+                    </div>
+                </div>
+
+                <!-- KPI Cards Row -->
+                <div class="metrics-grid" style="margin-bottom: 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
+                    <!-- Active Operators -->
+                    <div class="metric-card" style="border-left: 4px solid #10b981;">
+                        <div class="metric-icon emerald">
+                            <i data-lucide="users"></i>
+                        </div>
+                        <div class="metric-details">
+                            <span class="metric-title" style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">Active Operators</span>
+                            <h3 class="metric-value" id="user-kpi-active-users" style="font-size: 24px; font-weight: 700; color: var(--text-title); margin: 0;">0</h3>
+                        </div>
+                    </div>
+                    <!-- Top Operator -->
+                    <div class="metric-card" style="border-left: 4px solid #6366f1;">
+                        <div class="metric-icon blue">
+                            <i data-lucide="award"></i>
+                        </div>
+                        <div class="metric-details" style="max-width: 150px; overflow: hidden;">
+                            <span class="metric-title" style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">Top Operator</span>
+                            <h3 class="metric-value" id="user-kpi-top-operator" style="font-size: 24px; font-weight: 700; color: var(--text-title); margin: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">N/A</h3>
+                        </div>
+                    </div>
+                    <!-- Total Processed -->
+                    <div class="metric-card" style="border-left: 4px solid #06b6d4;">
+                        <div class="metric-icon cyan">
+                            <i data-lucide="check-square"></i>
+                        </div>
+                        <div class="metric-details">
+                            <span class="metric-title" style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">Total Processed</span>
+                            <h3 class="metric-value" id="user-kpi-total-volume" style="font-size: 24px; font-weight: 700; color: var(--text-title); margin: 0;">0</h3>
+                        </div>
+                    </div>
+                    <!-- Average Accuracy -->
+                    <div class="metric-card" style="border-left: 4px solid #f59e0b;">
+                        <div class="metric-icon amber">
+                            <i data-lucide="shield-check"></i>
+                        </div>
+                        <div class="metric-details">
+                            <span class="metric-title" style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">Average Accuracy</span>
+                            <h3 class="metric-value" id="user-kpi-avg-accuracy" style="font-size: 24px; font-weight: 700; color: var(--text-title); margin: 0;">0%</h3>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Full-Width Leaderboard Table -->
+                <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+                    <div class="global-chart-header" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Operator Leaderboard & Ranks</h3>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; color: var(--text-muted);">Sort by:</span>
+                            <select id="leaderboard-sort-select" style="padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-color); font-size: 12px; font-weight: 600; outline: none; cursor: pointer; color-scheme: dark;">
+                                <option value="salesAmount">Sales Processed (Value)</option>
+                                <option value="salesCount">Invoices Count</option>
+                                <option value="accuracy">Accuracy Rate %</option>
+                                <option value="returnCount">Returns Handled</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="overflow-x: auto;">
+                        <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Rank</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: left; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Operator</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Sales Processed</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invoices</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Avg Value</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Disputes</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Specialty</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Grade</th>
+                                </tr>
+                            </thead>
+                            <tbody id="user-leaderboard-tbody">
+                                <!-- Dynamic rows loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Two-Column Chart Layout Below Table -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start;">
+                    <!-- Chart 1: Workload Share -->
+                    <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
+                        <div class="global-chart-header" style="margin-bottom: 16px;">
+                            <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Workload Share % (Total Invoices)</h3>
+                        </div>
+                        <div id="user-chart-volume-share" class="global-chart-container" style="height: 280px;"></div>
+                    </div>
+
+                    <!-- Chart 2: Platform Distribution -->
+                    <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
+                        <div class="global-chart-header" style="margin-bottom: 16px;">
+                            <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Marketplace Workload Distribution</h3>
+                        </div>
+                        <div id="user-chart-platform-share" class="global-chart-container" style="height: 280px;"></div>
+                    </div>
+                </div>
+
+                <!-- Team Productivity Trend Chart -->
+                <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+                    <div class="global-chart-header" style="margin-bottom: 16px;">
+                        <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Team Daily Productivity Trend (Total Invoices Processed)</h3>
+                    </div>
+                    <div id="user-chart-team-productivity-trend" class="global-chart-container" style="height: 300px;"></div>
+                </div>
+
+                <!-- Operator Comparison Section -->
+                <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+                    <div class="global-chart-header" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="git-compare" style="color: #8b5cf6;"></i>
+                            Operator Side-by-Side Comparison
+                        </h3>
+                    </div>
+                    <div style="display: flex; gap: 16px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; color: var(--text-muted);">Operator 1:</span>
+                            <select id="compare-op1-select" style="padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-color); font-size: 12px; outline: none; cursor: pointer; min-width: 120px; color-scheme: dark;"></select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; color: var(--text-muted);">Operator 2:</span>
+                            <select id="compare-op2-select" style="padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-color); font-size: 12px; outline: none; cursor: pointer; min-width: 120px; color-scheme: dark;"></select>
+                        </div>
+                        <button id="btn-compare-operators" style="padding: 6px 16px; border-radius: var(--radius-sm); background: #8b5cf6; color: #fff; font-size: 12px; font-weight: 600; border: none; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
+                            Compare Now
+                        </button>
+                    </div>
+
+                    <!-- Comparison Results Grid -->
+                    <div id="compare-results-container" class="hidden" style="display: grid; grid-template-columns: 1fr 120px 1fr; gap: 16px; align-items: stretch; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                        <!-- Left operator card -->
+                        <div id="compare-card-op1" style="padding: 16px; background: rgba(255,255,255,0.02); border-radius: var(--radius-sm); border: 1px solid var(--border-color);"></div>
+                        <!-- Versus divider -->
+                        <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; font-weight: 800; font-size: 18px; color: var(--text-muted);">
+                            <div style="padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 50%;">VS</div>
+                        </div>
+                        <!-- Right operator card -->
+                        <div id="compare-card-op2" style="padding: 16px; background: rgba(255,255,255,0.02); border-radius: var(--radius-sm); border: 1px solid var(--border-color);"></div>
+                    </div>
+                </div>
+
+                <!-- User Details & Daily Log (Initially hidden, revealed on click) -->
+                <div id="user-details-panel" class="hidden" style="margin-top: 32px; border-top: 1px solid var(--border-color); padding-top: 24px; animation: fadeIn 0.3s ease;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 16px;">
+                        <h3 style="font-size: 18px; font-weight: 700; color: var(--text-title); margin: 0; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="file-text" style="color: #6366f1; width: 20px; height: 20px;"></i>
+                            Daily Activity Log: <span id="user-details-selected-name" style="color: #10b981;">ASHISH</span>
+                        </h3>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <div onclick="try{document.getElementById('user-details-date-filter').showPicker()}catch(e){}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer;">
+                                <i data-lucide="calendar" style="width: 14px; height: 14px; color: var(--text-muted);"></i>
+                                <span style="font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; user-select: none;">Date Filter:</span>
+                                <input type="date" id="user-details-date-filter" onclick="event.stopPropagation()" style="border: none; background: transparent; color: var(--text-color); font-size: 12px; outline: none; cursor: pointer; color-scheme: dark;">
+                                <button id="btn-clear-date-filter" onclick="event.stopPropagation(); document.getElementById('user-details-date-filter').value=''; document.getElementById('user-details-date-filter').dispatchEvent(new Event('change')); this.style.display='none';" style="border: none; background: transparent; color: #f43f5e; cursor: pointer; display: none; font-size: 11px; font-weight: 700; padding: 2px 4px;">Clear</button>
+                            </div>
+                            <button id="btn-export-scorecard" style="padding: 6px 14px; font-size: 12px; display: flex; align-items: center; gap: 6px; border: 1px solid #6366f140; background: linear-gradient(135deg, #6366f120, #6366f108); color: #6366f1; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600; transition: all 0.2s;">
+                                <i data-lucide="download" style="width: 14px; height: 14px;"></i> Export Scorecard
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="btn-close-user-details" style="padding: 6px 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-color); background: rgba(255,255,255,0.05); color: var(--text-color); cursor: pointer; border-radius: var(--radius-sm);">
+                                <i data-lucide="x" style="width: 14px; height: 14px;"></i> Close Log
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Daily KPIs row for selected user -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Daily Avg Invoices</span>
+                            <h4 id="user-detail-kpi-daily-avg" style="font-size: 20px; font-weight: 700; color: var(--text-title); margin: 4px 0 0 0;">0</h4>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Max Daily Output</span>
+                            <h4 id="user-detail-kpi-max-day" style="font-size: 20px; font-weight: 700; color: var(--text-title); margin: 4px 0 0 0;">0</h4>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Avg Invoice Value</span>
+                            <h4 id="user-detail-kpi-avg-val" style="font-size: 20px; font-weight: 700; color: #10b981; margin: 4px 0 0 0;">₹0</h4>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Accuracy Rate</span>
+                            <h4 id="user-detail-kpi-accuracy" style="font-size: 20px; font-weight: 700; color: #f59e0b; margin: 4px 0 0 0;">0%</h4>
+                        </div>
+                    </div>
+
+                    <!-- Platform breakdown (Amazon, Ajio, Myntra, Flipkart) -->
+                    <div style="margin-bottom: 24px;">
+                        <h4 style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.5px;">Platform Breakdown (Sales vs Purchase vs Returns)</h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+                            
+                            <!-- Amazon -->
+                            <div style="background: rgba(255, 153, 0, 0.02); border: 1px solid rgba(255, 153, 0, 0.1); border-radius: var(--radius-md); padding: 14px 16px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <span style="display: inline-block; padding: 3px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; background: rgba(255, 153, 0, 0.15); color: #ff9900; border: 1px solid rgba(255, 153, 0, 0.25);">Amazon</span>
+                                    <span id="user-platform-count-amz" style="font-size: 12px; font-weight: 700; color: var(--text-title);">0 Invoices</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Sale:</span>
+                                        <span id="user-platform-sale-amz" style="font-weight: 700; color: #10b981;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Purchase:</span>
+                                        <span id="user-platform-purchase-amz" style="font-weight: 700; color: #06b6d4;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">CN/DN (Returns):</span>
+                                        <span id="user-platform-returns-amz" style="font-weight: 700; color: #ef4444;">₹0 (0)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Ajio -->
+                            <div style="background: rgba(16, 185, 129, 0.02); border: 1px solid rgba(16, 185, 129, 0.1); border-radius: var(--radius-md); padding: 14px 16px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <span style="display: inline-block; padding: 3px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.25);">Ajio</span>
+                                    <span id="user-platform-count-ajio" style="font-size: 12px; font-weight: 700; color: var(--text-title);">0 Invoices</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Sale:</span>
+                                        <span id="user-platform-sale-ajio" style="font-weight: 700; color: #10b981;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Purchase:</span>
+                                        <span id="user-platform-purchase-ajio" style="font-weight: 700; color: #06b6d4;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">CN/DN (Returns):</span>
+                                        <span id="user-platform-returns-ajio" style="font-weight: 700; color: #ef4444;">₹0 (0)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Myntra -->
+                            <div style="background: rgba(244, 63, 94, 0.02); border: 1px solid rgba(244, 63, 94, 0.1); border-radius: var(--radius-md); padding: 14px 16px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <span style="display: inline-block; padding: 3px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; background: rgba(244, 63, 94, 0.15); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.25);">Myntra</span>
+                                    <span id="user-platform-count-myn" style="font-size: 12px; font-weight: 700; color: var(--text-title);">0 Invoices</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Sale:</span>
+                                        <span id="user-platform-sale-myn" style="font-weight: 700; color: #10b981;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Purchase:</span>
+                                        <span id="user-platform-purchase-myn" style="font-weight: 700; color: #06b6d4;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">CN/DN (Returns):</span>
+                                        <span id="user-platform-returns-myn" style="font-weight: 700; color: #ef4444;">₹0 (0)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Flipkart -->
+                            <div style="background: rgba(0, 131, 202, 0.02); border: 1px solid rgba(0, 131, 202, 0.1); border-radius: var(--radius-md); padding: 14px 16px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <span style="display: inline-block; padding: 3px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; background: rgba(0, 131, 202, 0.15); color: #0083ca; border: 1px solid rgba(0, 131, 202, 0.25);">Flipkart</span>
+                                    <span id="user-platform-count-fk" style="font-size: 12px; font-weight: 700; color: var(--text-title);">0 Invoices</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Sale:</span>
+                                        <span id="user-platform-sale-fk" style="font-weight: 700; color: #10b981;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">Total Purchase:</span>
+                                        <span id="user-platform-purchase-fk" style="font-weight: 700; color: #06b6d4;">₹0</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                        <span style="color: var(--text-muted);">CN/DN (Returns):</span>
+                                        <span id="user-platform-returns-fk" style="font-weight: 700; color: #ef4444;">₹0 (0)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: start; flex-wrap: wrap;">
+                        <!-- Daily Log Table -->
+                        <div class="global-chart-wrapper" style="padding: 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                            <div style="overflow-y: auto; max-height: 320px;">
+                                <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr>
+                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: left; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Date</th>
+                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invoices Created</th>
+                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Sales Amount</th>
+                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Disputes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="user-details-daily-tbody">
+                                        <!-- Dynamic daily rows -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Daily Trend Line Chart -->
+                        <div class="global-chart-wrapper" style="padding: 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                            <div class="global-chart-header" style="margin-bottom: 12px;">
+                                <h4 style="font-size: 14px; font-weight: 600; color: var(--text-title); margin: 0;">Daily Invoices Trend</h4>
+                            </div>
+                            <div id="user-chart-daily-trend" class="global-chart-container" style="height: 250px;"></div>
                         </div>
                     </div>
                 </div>
