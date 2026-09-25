@@ -60,6 +60,10 @@ const state = {
     monthlySheetId: '13XegFLinVbeFDOElX7ShcuxGGy7If73jX79Bi2w0Dk4',
     monthlyTabs: [],
     
+    // User Analysis Configuration
+    userDataSource: 'live', // 'live' (default), 'combined', or 'monthly'
+    selectedUserMonth: 'ALL',
+
     tabs: [], // Current active tabs array (pointing to invoiceTabs, returnTabs, or monthlyTabs)
     activeTab: '',
     viewMode: 'both', // 'both', 'data', or 'chart'
@@ -90,6 +94,14 @@ const state = {
 // MONTHLY CONSOLIDATED GLOBAL CACHE
 // ==========================================
 const monthlyGlobalCache = {
+    results: null,
+    timestamp: 0
+};
+
+// ==========================================
+// LIVE USER ANALYSIS CACHE (INVOICE + RETURN)
+// ==========================================
+const liveUserCache = {
     results: null,
     timestamp: 0
 };
@@ -276,6 +288,9 @@ function loadSettings() {
     if (savedRefresh !== null) {
         state.refreshRate = parseInt(savedRefresh, 10);
     }
+
+    const savedUserDataSource = localStorage.getItem('userDataSource') || 'live';
+    state.userDataSource = savedUserDataSource;
     
     document.documentElement.setAttribute('data-theme', savedTheme);
 }
@@ -307,6 +322,10 @@ function setupEventListeners() {
             state.monthlyTabs = [];
         }
         state.tabs = []; // Clear current tabs
+        liveUserCache.results = null;
+        liveUserCache.timestamp = 0;
+        monthlyGlobalCache.results = null;
+        monthlyGlobalCache.timestamp = 0;
         fetchData();
     });
 
@@ -743,7 +762,7 @@ async function fetchData() {
     }
 
     try {
-        if (state.activeMode === 'global' || state.activeMode === 'user') {
+        if (state.activeMode === 'global') {
             let rawResults;
             const now = Date.now();
             const cacheValidity = 60000; // Cache for 1 minute
@@ -751,17 +770,18 @@ async function fetchData() {
             if (monthlyGlobalCache.results && (now - monthlyGlobalCache.timestamp < cacheValidity)) {
                 rawResults = monthlyGlobalCache.results;
             } else {
-                rawResults = await fetchGlobalMonthlyData(currentSheetId);
+                rawResults = await fetchGlobalMonthlyData(state.monthlySheetId);
                 monthlyGlobalCache.results = rawResults;
                 monthlyGlobalCache.timestamp = now;
             }
             
-            if (state.activeMode === 'global') {
-                parseGlobalMonthlyData(rawResults);
-            } else {
-                parseUserAnalysisData(rawResults);
-            }
-            
+            parseGlobalMonthlyData(rawResults);
+            showLoader(false);
+            updateStatusPill('success');
+            setupAutoRefreshTimer();
+            return;
+        } else if (state.activeMode === 'user') {
+            await fetchAndRenderUserAnalysis();
             showLoader(false);
             updateStatusPill('success');
             setupAutoRefreshTimer();
@@ -4118,39 +4138,151 @@ function renderFilteredDashboard(selectedMonth, sortedMonths) {
     }
 }
 
-/**
- * Parses raw gviz json responses and invokes consolidation for User Analysis
- */
-function parseUserAnalysisData(results) {
-    let allReport = null;
-    let monthlyData = null;
-    let allReturnReport = null;
-    let monthlyReturnData = null;
+// ==========================================
+// USER PERFORMANCE & LEADERBOARD ENGINE (DUAL-ENGINE)
+// ==========================================
 
-    results.forEach(res => {
-        const parsed = parseRawGvizJson(res.text);
-        if (res.tab === 'ALL REPORT') allReport = parsed;
-        if (res.tab === 'MONTHLY DATA') monthlyData = parsed;
-        if (res.tab === 'ALL RETURN REPORT') allReturnReport = parsed;
-        if (res.tab === 'MONTHLY RETURN DATA') monthlyReturnData = parsed;
+/**
+ * Fetches all 8 marketplace tabs across Invoice Sheet and Return Sheet in parallel
+ */
+async function fetchLiveUserData(invoiceSheetId, returnSheetId) {
+    const invoiceTabs = ['AMAZON', 'AJIO', 'MYNTRA', 'FLIPKART'];
+    const returnTabs = ['AMAZON RETURN', 'AJIO RETURN', 'MYNTRA RETURN', 'FLIPKART RETURN'];
+
+    const invoicePromises = invoiceTabs.map(async (tab) => {
+        try {
+            const encodedTab = encodeURIComponent(tab);
+            const targetUrl = `https://docs.google.com/spreadsheets/d/${invoiceSheetId}/gviz/tq?tqx=out:json&sheet=${encodedTab}`;
+            const response = await fetch(targetUrl);
+            if (!response.ok) return { type: 'invoice', tab, text: null };
+            const text = await response.text();
+            return { type: 'invoice', tab, text };
+        } catch (e) {
+            console.warn(`Failed fetching invoice tab ${tab}:`, e);
+            return { type: 'invoice', tab, text: null };
+        }
     });
 
-    if (!allReport || !monthlyData || !allReturnReport) {
-        console.error("Failed to parse critical sheets for consolidated user analysis.");
-        return;
+    const returnPromises = returnTabs.map(async (tab) => {
+        try {
+            const encodedTab = encodeURIComponent(tab);
+            const targetUrl = `https://docs.google.com/spreadsheets/d/${returnSheetId}/gviz/tq?tqx=out:json&sheet=${encodedTab}`;
+            const response = await fetch(targetUrl);
+            if (!response.ok) return { type: 'return', tab, text: null };
+            const text = await response.text();
+            return { type: 'return', tab, text };
+        } catch (e) {
+            console.warn(`Failed fetching return tab ${tab}:`, e);
+            return { type: 'return', tab, text: null };
+        }
+    });
+
+    const allResults = await Promise.all([...invoicePromises, ...returnPromises]);
+    const invoices = {};
+    const returns = {};
+
+    allResults.forEach(item => {
+        if (item.type === 'invoice') invoices[item.tab] = item.text;
+        else returns[item.tab] = item.text;
+    });
+
+    return { invoices, returns };
+}
+
+/**
+ * High-level router to coordinate fetching based on selected userDataSource:
+ * 'live' (default), 'combined', or 'monthly'
+ */
+async function fetchAndRenderUserAnalysis() {
+    const now = Date.now();
+    const cacheValidity = 120000; // 2 minutes cache
+    const source = state.userDataSource || 'live';
+
+    let liveData = null;
+    let monthlyData = null;
+
+    if (source === 'live' || source === 'combined') {
+        if (liveUserCache.results && (now - liveUserCache.timestamp < cacheValidity)) {
+            liveData = liveUserCache.results;
+        } else {
+            liveData = await fetchLiveUserData(state.sheetId, state.returnSheetId);
+            liveUserCache.results = liveData;
+            liveUserCache.timestamp = now;
+        }
     }
 
-    currentDashboardData = { allReport, monthlyData, allReturnReport, monthlyReturnData };
+    if (source === 'monthly' || source === 'combined') {
+        if (monthlyGlobalCache.results && (now - monthlyGlobalCache.timestamp < cacheValidity)) {
+            monthlyData = monthlyGlobalCache.results;
+        } else {
+            monthlyData = await fetchGlobalMonthlyData(state.monthlySheetId);
+            monthlyGlobalCache.results = monthlyData;
+            monthlyGlobalCache.timestamp = now;
+        }
+    }
 
-    // 1. Collect unique month names
+    parseUserAnalysisData(monthlyData, liveData);
+}
+
+/**
+ * Parses raw gviz json responses and populates UI filters for User Analysis
+ */
+function parseUserAnalysisData(monthlyResults, liveResults) {
+    currentDashboardData = {
+        monthlyResults,
+        liveResults,
+        source: state.userDataSource || 'live'
+    };
+
+    // 1. Collect all available month names across active data sources
     const monthKeys = new Set();
-    allReport.rows.forEach(row => {
-        if (!row || !row.c) return;
-        [0, 8, 16, 24].forEach(idx => {
-            const m = extractMonthYearFromCell(row.c[idx]);
-            if (m) monthKeys.add(m);
+
+    // From Live Results (Invoices and Returns)
+    if (liveResults) {
+        if (liveResults.invoices) {
+            Object.values(liveResults.invoices).forEach(rawText => {
+                if (!rawText) return;
+                const table = parseRawGvizJson(rawText);
+                if (!table || !table.rows) return;
+                table.rows.forEach(r => {
+                    if (!r || !r.c) return;
+                    const m = extractMonthYearFromCell(r.c[2], r.c[14]);
+                    if (m && m !== 'Other') monthKeys.add(m);
+                });
+            });
+        }
+        if (liveResults.returns) {
+            Object.values(liveResults.returns).forEach(rawText => {
+                if (!rawText) return;
+                const table = parseRawGvizJson(rawText);
+                if (!table || !table.rows) return;
+                table.rows.forEach(r => {
+                    if (!r || !r.c) return;
+                    const cnM = extractMonthYearFromCell(r.c[4] || r.c[3], r.c[8]);
+                    if (cnM && cnM !== 'Other') monthKeys.add(cnM);
+                    const dnM = extractMonthYearFromCell(r.c[17] || r.c[16], r.c[21]);
+                    if (dnM && dnM !== 'Other') monthKeys.add(dnM);
+                });
+            });
+        }
+    }
+
+    // From Monthly Results
+    if (monthlyResults) {
+        monthlyResults.forEach(res => {
+            const table = parseRawGvizJson(res.text);
+            if (!table || !table.rows) return;
+            if (res.tab === 'ALL REPORT' || res.tab === 'MONTHLY DATA') {
+                table.rows.forEach(r => {
+                    if (!r || !r.c) return;
+                    [0, 8, 16, 24].forEach(idx => {
+                        const m = extractMonthYearFromCell(r.c[idx]);
+                        if (m && m !== 'Other') monthKeys.add(m);
+                    });
+                });
+            }
         });
-    });
+    }
 
     const sortedMonths = Array.from(monthKeys).sort((a, b) => {
         const parseDate = (str) => {
@@ -4161,9 +4293,25 @@ function parseUserAnalysisData(results) {
         return parseDate(a) - parseDate(b);
     });
 
-    // 2. Populate Dropdown Month Filter
+    // 2. Wire Data Source Switcher
+    const sourceSelect = document.getElementById('user-source-filter');
+    if (sourceSelect) {
+        sourceSelect.value = state.userDataSource || 'live';
+        if (!sourceSelect.dataset.wired) {
+            sourceSelect.dataset.wired = 'true';
+            sourceSelect.addEventListener('change', (e) => {
+                state.userDataSource = e.target.value;
+                localStorage.setItem('userDataSource', e.target.value);
+                showLoader(true);
+                fetchAndRenderUserAnalysis().finally(() => showLoader(false));
+            });
+        }
+    }
+
+    // 3. Populate Dropdown Month Filter
     const filterSelect = document.getElementById('user-month-filter');
     if (filterSelect) {
+        const prevMonth = state.selectedUserMonth || 'ALL';
         filterSelect.innerHTML = '<option value="ALL">All Months</option>';
         sortedMonths.forEach(m => {
             const opt = document.createElement('option');
@@ -4172,16 +4320,23 @@ function parseUserAnalysisData(results) {
             filterSelect.appendChild(opt);
         });
 
-        // Replace with clean clone to detach previous event listeners
+        if (prevMonth === 'ALL' || sortedMonths.includes(prevMonth)) {
+            filterSelect.value = prevMonth;
+        } else {
+            filterSelect.value = 'ALL';
+            state.selectedUserMonth = 'ALL';
+        }
+
         const newSelect = filterSelect.cloneNode(true);
         filterSelect.parentNode.replaceChild(newSelect, filterSelect);
 
         newSelect.addEventListener('change', (e) => {
+            state.selectedUserMonth = e.target.value;
             renderUserDashboard(e.target.value, sortedMonths);
         });
     }
 
-    // Wire sort dropdown if not already wired
+    // 4. Wire Sort Dropdown
     const sortSelect = document.getElementById('leaderboard-sort-select');
     if (sortSelect && !sortSelect.dataset.wired) {
         sortSelect.dataset.wired = 'true';
@@ -4190,8 +4345,8 @@ function parseUserAnalysisData(results) {
         });
     }
 
-    // 3. Render initial dashboard
-    renderUserDashboard('ALL', sortedMonths);
+    // 5. Render Initial Dashboard
+    renderUserDashboard(state.selectedUserMonth || 'ALL', sortedMonths);
 }
 
 /**
@@ -4200,12 +4355,58 @@ function parseUserAnalysisData(results) {
 function renderUserDashboard(selectedMonth, sortedMonths) {
     if (!currentDashboardData) return;
 
-    const { monthlyData, monthlyReturnData } = currentDashboardData;
+    const { monthlyResults, liveResults } = currentDashboardData;
     const users = {};
 
     const isValidOperator = (op) => {
-        return op && op !== 'TRUE' && !op.includes('2026') && op.length > 2;
+        if (!op || typeof op !== 'string') return false;
+        const clean = op.trim().toUpperCase();
+        if (clean.length < 2 || clean.length > 30) return false;
+        const blacklisted = [
+            'TRUE', 'FALSE', 'NULL', 'UNDEFINED', 'USER', 'USER DATA',
+            'VENDOR', 'VENDOR NAME', 'TOTAL', 'REMARK', 'STATUS', 'DATE',
+            'TIME', 'TIMESTAMP', 'UNKNOWN', 'N/A', 'NONE', 'ALL CLEAR',
+            'DISPUTE', 'HOLD', 'REJECT', 'ADMIN', 'SYSTEM'
+        ];
+        if (blacklisted.includes(clean)) return false;
+        if (/^\d{4}$/.test(clean) || /^\d{1,2}[\/-]\d{1,2}/.test(clean)) return false;
+        if (!/[A-Z]/.test(clean)) return false;
+        return true;
     };
+
+    const extractOperator = (timeStr) => {
+        if (!timeStr) return null;
+        let s = String(timeStr).trim();
+        let match = s.match(/\(([^)]+)\)/);
+        if (match) {
+            let op = match[1].trim().toUpperCase();
+            if (isValidOperator(op)) return op;
+        }
+        match = s.match(/-\s*"?([A-Za-z\s]+)"?/i);
+        if (match) {
+            let op = match[1].trim().toUpperCase();
+            if (isValidOperator(op)) return op;
+        }
+        let clean = s.replace(/["']/g, '').trim().toUpperCase();
+        if (isValidOperator(clean)) {
+            return clean;
+        }
+        return null;
+    };
+
+    const extractHour = (cell) => {
+        if (!cell) return null;
+        const s = String(cell.f || cell.v || '');
+        const m = s.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
+        if (m) {
+            const h = parseInt(m[1], 10);
+            if (h >= 0 && h <= 23) return h;
+        }
+        return null;
+    };
+
+    const teamHourlyDistribution = new Array(24).fill(0);
+    const globalAuditAlerts = [];
 
     const ensureUser = (name) => {
         if (!users[name]) {
@@ -4213,6 +4414,9 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
                 name: name,
                 salesCount: 0,
                 salesAmount: 0,
+                purchaseAmount: 0,
+                grossProfit: 0,
+                profitMargin: 0,
                 salesQty: 0,
                 purchaseQty: 0,
                 returnCount: 0,
@@ -4223,24 +4427,25 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
                 platformPurchases: { amz: 0, ajio: 0, myn: 0, fk: 0 },
                 platformSalesQty: { amz: 0, ajio: 0, myn: 0, fk: 0 },
                 platformPurchasesQty: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                platformInvoicesCount: { amz: 0, ajio: 0, myn: 0, fk: 0 },
                 platformReturnsCount: { amz: 0, ajio: 0, myn: 0, fk: 0 },
                 platformReturnsAmount: { amz: 0, ajio: 0, myn: 0, fk: 0 },
+                hourlyDistribution: new Array(24).fill(0),
+                dayWorkedHours: {},
+                auditAlerts: [],
                 dailyLog: {}
             };
         }
         return users[name];
     };
 
-    // Helper to extract a short date string (DD-MM-YYYY) from a cell (can be Date object, timestamp string, or fallback)
     const extractDateKey = (cell, fallbackCell) => {
         if (!cell || (cell.v === null && cell.f === null)) {
             return fallbackCell ? extractDateKey(fallbackCell) : null;
         }
 
-        // 1. Try extracting from formatted value cell.f first, as it contains the exact day/month/year shown in the sheet
         if (cell.f) {
             let fVal = String(cell.f);
-            // Match DD/MM/YYYY or MM/DD/YYYY or M/D/YYYY or D/M/YYYY
             const match = fVal.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
             if (match) {
                 const dd = match[1].padStart(2, '0');
@@ -4252,8 +4457,6 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
         
         let val = cell.v !== null && cell.v !== undefined ? String(cell.v) : '';
         
-        // 2. Try matching timestamp string starting with Date/Time like "03/07/2026 10:41:46 - JANVI"
-        // Regex matches DD/MM/YYYY or MM/DD/YYYY or M/D/YYYY or D/M/YYYY
         const match = val.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
         if (match) {
             const dd = match[1].padStart(2, '0');
@@ -4267,7 +4470,6 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
             return `${dd}-${mm}-20${matchShortYear[3]}`;
         }
 
-        // 3. Try parsing Google Date string Date(y, m, d)
         if (val.startsWith('Date(')) {
             let dateObj = parseGoogleDateString(val);
             if (dateObj instanceof Date) {
@@ -4277,11 +4479,9 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
             }
         }
         
-        // 4. Try parsing fallback if this cell was just a name or text
         if (fallbackCell) {
             return extractDateKey(fallbackCell);
         }
-        
         return null;
     };
 
@@ -4291,8 +4491,12 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
             u.dailyLog[dateKey] = {
                 invoices: 0,
                 amount: 0,
-                disputes: 0,
+                purchaseAmount: 0,
+                grossProfit: 0,
                 returns: 0,
+                returnAmt: 0,
+                disputes: 0,
+                hourly: new Array(24).fill(0),
                 platforms: {
                     amz: { invoices: 0, sale: 0, purchase: 0, saleQty: 0, purchaseQty: 0, returns: 0, returnAmt: 0 },
                     ajio: { invoices: 0, sale: 0, purchase: 0, saleQty: 0, purchaseQty: 0, returns: 0, returnAmt: 0 },
@@ -4304,237 +4508,652 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
         return u.dailyLog[dateKey];
     };
 
-    // Helper to check and accumulate invoice row
-    const processInvoice = (opCell, defaultUser, saleVal, purchaseVal, statusVal, platformKey, fallbackDateCell, saleQtyVal, purchaseQtyVal) => {
-        let op = extractOperator(opCell?.v) || defaultUser;
-        if (op) op = op.trim().toUpperCase();
-        if (isValidOperator(op)) {
-            const u = ensureUser(op);
-            const amt = parseValToNum(saleVal);
-            const pAmt = parseValToNum(purchaseVal);
-            const sQty = parseValToNum(saleQtyVal) || 1;
-            const pQty = parseValToNum(purchaseQtyVal) || 1;
-            
-            u.salesCount++;
-            u.salesAmount += amt;
-            u.salesQty += sQty;
-            u.purchaseQty += pQty;
-            
-            u.platforms[platformKey]++;
-            u.platformSales[platformKey] += amt;
-            u.platformPurchases[platformKey] += pAmt;
-            u.platformSalesQty[platformKey] += sQty;
-            u.platformPurchasesQty[platformKey] += pQty;
-            
-            let isDispute = false;
-            if (statusVal) {
-                const st = String(statusVal).toUpperCase();
-                if (st.includes('DISPUTE') || st.includes('HOLD') || st.includes('REJECT')) {
-                    u.disputes++;
-                    isDispute = true;
+    // ==========================================
+    // 1. PROCESS LIVE RESULTS (INVOICE & RETURN SHEETS)
+    // ==========================================
+    if (liveResults) {
+        // A. Live Invoices
+        if (liveResults.invoices) {
+            const invPlatformMap = { 'AMAZON': 'amz', 'AJIO': 'ajio', 'MYNTRA': 'myn', 'FLIPKART': 'fk' };
+            Object.entries(liveResults.invoices).forEach(([tabName, rawText]) => {
+                if (!rawText) return;
+                const platformKey = invPlatformMap[tabName] || 'amz';
+                const table = parseRawGvizJson(rawText);
+                if (!table || !table.rows) return;
+
+                let startIdx = 0;
+                if (table.rows.length > 0) {
+                    const firstRow0 = table.rows[0].c && table.rows[0].c[0];
+                    if (firstRow0 && String(firstRow0.v || '').toUpperCase() === 'INVOICE ID') {
+                        startIdx = 1;
+                    }
                 }
-            }
 
-            // Daily log tracking (Primary: operator timestamp cell, Fallback: invoice date cell)
-            const dk = extractDateKey(opCell, fallbackDateCell);
-            const dayEntry = ensureDailyEntry(u, dk);
-            if (dayEntry) {
-                dayEntry.invoices++;
-                dayEntry.amount += amt;
-                if (isDispute) dayEntry.disputes++;
+                for (let i = startIdx; i < table.rows.length; i++) {
+                    const r = table.rows[i];
+                    if (!r || !r.c) continue;
 
-                // Track platform breakdown for this day
-                const pInfo = dayEntry.platforms[platformKey];
-                pInfo.invoices++;
-                pInfo.sale += amt;
-                pInfo.purchase += pAmt;
-                pInfo.saleQty += sQty;
-                pInfo.purchaseQty += pQty;
-            }
+                    const m = extractMonthYearFromCell(r.c[2], r.c[14]);
+                    if (selectedMonth !== 'ALL' && m !== selectedMonth) continue;
+
+                    const timeCell = r.c[14];
+                    const userCell = r.c[17];
+                    const op = extractOperator(timeCell?.v) || extractOperator(userCell?.v);
+
+                    if (isValidOperator(op)) {
+                        const u = ensureUser(op);
+                        const amt = parseValToNum(r.c[5]?.f || r.c[5]?.v);
+                        const pAmt = parseValToNum(r.c[12]?.f || r.c[12]?.v);
+                        const sQty = parseValToNum(r.c[4]?.v) || 1;
+                        const pQty = parseValToNum(r.c[11]?.v) || 1;
+
+                        u.salesCount++;
+                        u.salesAmount += amt;
+                        u.purchaseAmount += pAmt;
+                        u.salesQty += sQty;
+                        u.purchaseQty += pQty;
+
+                        u.platforms[platformKey]++;
+                        u.platformInvoicesCount[platformKey]++;
+                        u.platformSales[platformKey] += amt;
+                        u.platformPurchases[platformKey] += pAmt;
+                        u.platformSalesQty[platformKey] += sQty;
+                        u.platformPurchasesQty[platformKey] += pQty;
+
+                        const remark = String(r.c[15]?.v || '').toUpperCase();
+                        let isDispute = false;
+                        if (['DISPUTE', 'HOLD', 'REJECT', 'FLAG'].some(w => remark.includes(w))) {
+                            u.disputes++;
+                            isDispute = true;
+                        }
+
+                        const dk = extractDateKey(timeCell, r.c[2]);
+                        const dayEntry = ensureDailyEntry(u, dk);
+                        if (dayEntry) {
+                            dayEntry.invoices++;
+                            dayEntry.amount += amt;
+                            dayEntry.purchaseAmount += pAmt;
+                            dayEntry.grossProfit += (amt - pAmt);
+                            if (isDispute) dayEntry.disputes++;
+
+                            const pInfo = dayEntry.platforms[platformKey];
+                            pInfo.invoices++;
+                            pInfo.sale += amt;
+                            pInfo.purchase += pAmt;
+                            pInfo.saleQty += sQty;
+                            pInfo.purchaseQty += pQty;
+                        }
+
+                        const h = extractHour(timeCell);
+                        if (h !== null) {
+                            u.hourlyDistribution[h]++;
+                            teamHourlyDistribution[h]++;
+                            if (dk) {
+                                if (!u.dayWorkedHours[dk]) u.dayWorkedHours[dk] = new Set();
+                                u.dayWorkedHours[dk].add(h);
+                            }
+                            if (dayEntry) dayEntry.hourly[h]++;
+                        }
+
+                        const invRef = r.c[0]?.v || r.c[1]?.v || 'N/A';
+                        if (amt > 2500) {
+                            const item = { date: dk || 'N/A', op, platform: platformKey, ref: invRef, amt, issue: 'High-Value Invoice (>₹2,500)', type: 'high-inv' };
+                            u.auditAlerts.push(item);
+                            globalAuditAlerts.push(item);
+                        }
+                        if (amt > 0 && pAmt === 0) {
+                            const item = { date: dk || 'N/A', op, platform: platformKey, ref: invRef, amt, issue: 'Missing Purchase Cost (₹0 Cost)', type: 'zero-purch' };
+                            u.auditAlerts.push(item);
+                            globalAuditAlerts.push(item);
+                        }
+                        if (isDispute) {
+                            const item = { date: dk || 'N/A', op, platform: platformKey, ref: invRef, amt, issue: `Disputed / Flagged (${remark.slice(0, 30)})`, type: 'dispute' };
+                            u.auditAlerts.push(item);
+                            globalAuditAlerts.push(item);
+                        }
+                    }
+                }
+            });
         }
-    };
 
-    // 1. Process Sales / Invoices Data
-    if (monthlyData && monthlyData.rows) {
-        monthlyData.rows.forEach(row => {
-            if (!row || !row.c) return;
+        // B. Live Returns (Credit Note & Debit Note)
+        if (liveResults.returns) {
+            const retPlatformMap = {
+                'AMAZON RETURN': 'amz',
+                'AJIO RETURN': 'ajio',
+                'MYNTRA RETURN': 'myn',
+                'FLIPKART RETURN': 'fk'
+            };
 
-            // Amazon (Offset 0)
-            const amzM = extractMonthYearFromCell(row.c[0], row.c[15]);
-            if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
-                const user = row.c[18] ? String(row.c[18].v || '').trim().toUpperCase() : null;
-                processInvoice(row.c[15], user, row.c[6]?.v, row.c[13]?.v, row.c[16]?.v, 'amz', row.c[0], row.c[5]?.v, row.c[12]?.v);
-            }
-            
-            // Ajio (Offset 21)
-            const ajioM = extractMonthYearFromCell(row.c[21], row.c[36]);
-            if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
-                processInvoice(row.c[36], null, row.c[27]?.v, row.c[34]?.v, row.c[37]?.v, 'ajio', row.c[21], row.c[26]?.v, row.c[33]?.v);
-            }
-            
-            // Myntra (Offset 42)
-            const mynM = extractMonthYearFromCell(row.c[42], row.c[57]);
-            if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
-                processInvoice(row.c[57], null, row.c[48]?.v, row.c[55]?.v, row.c[58]?.v, 'myn', row.c[42], row.c[47]?.v, row.c[54]?.v);
-            }
-            
-            // Flipkart (Offset 62)
-            const fkM = extractMonthYearFromCell(row.c[62], row.c[77]);
-            if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
-                const user = row.c[80] ? String(row.c[80].v || '').trim().toUpperCase() : null;
-                processInvoice(row.c[77], user, row.c[68]?.v, row.c[75]?.v, row.c[78]?.v, 'fk', row.c[62], row.c[67]?.v, row.c[74]?.v);
-            }
-        });
+            Object.entries(liveResults.returns).forEach(([tabName, rawText]) => {
+                if (!rawText) return;
+                const platformKey = retPlatformMap[tabName] || 'amz';
+                const table = parseRawGvizJson(rawText);
+                if (!table || !table.rows) return;
+
+                let startIdx = 0;
+                if (table.rows.length > 1) {
+                    const r0 = table.rows[0].c && table.rows[0].c[0];
+                    if (r0 && String(r0.v || '').toUpperCase().startsWith('CREDIT NOTE')) {
+                        startIdx = (table.rows.length > 2 && String(table.rows[1].c && table.rows[1].c[0]?.v || '').toUpperCase().includes('NO')) ? 2 : 1;
+                    }
+                }
+
+                for (let i = startIdx; i < table.rows.length; i++) {
+                    const r = table.rows[i];
+                    if (!r || !r.c) continue;
+
+                    // Credit Note (Sales Return)
+                    const cnDateCell = r.c[4] || r.c[3];
+                    const cnUserCell = r.c[8];
+                    const cnMonth = extractMonthYearFromCell(cnDateCell, cnUserCell);
+
+                    if (selectedMonth === 'ALL' || cnMonth === selectedMonth) {
+                        const cnOp = extractOperator(cnUserCell?.v);
+                        if (isValidOperator(cnOp)) {
+                            const u = ensureUser(cnOp);
+                            const amt = parseValToNum(r.c[6]?.f || r.c[6]?.v);
+                            u.returnCount++;
+                            u.returnAmount += amt;
+                            u.platforms[platformKey]++;
+                            u.platformReturnsCount[platformKey]++;
+                            u.platformReturnsAmount[platformKey] += amt;
+
+                            const dk = extractDateKey(cnUserCell, cnDateCell);
+                            const dayEntry = ensureDailyEntry(u, dk);
+                            if (dayEntry) {
+                                dayEntry.returns++;
+                                dayEntry.returnAmt += amt;
+                                dayEntry.platforms[platformKey].returns++;
+                                dayEntry.platforms[platformKey].returnAmt += amt;
+                            }
+
+                            const h_cn = extractHour(cnUserCell);
+                            if (h_cn !== null) {
+                                u.hourlyDistribution[h_cn]++;
+                                teamHourlyDistribution[h_cn]++;
+                                if (dk) {
+                                    if (!u.dayWorkedHours[dk]) u.dayWorkedHours[dk] = new Set();
+                                    u.dayWorkedHours[dk].add(h_cn);
+                                }
+                                if (dayEntry) dayEntry.hourly[h_cn]++;
+                            }
+
+                            const retRef = r.c[0]?.v || r.c[1]?.v || 'N/A';
+                            if (amt > 2000) {
+                                const item = { date: dk || 'N/A', op: cnOp, platform: platformKey, ref: retRef, amt, issue: 'High-Value Return (>₹2,000)', type: 'high-ret' };
+                                u.auditAlerts.push(item);
+                                globalAuditAlerts.push(item);
+                            }
+                        }
+                    }
+
+                    // Debit Note (Purchase Return)
+                    const dnDateCell = r.c[17] || r.c[16];
+                    const dnUserCell = r.c[21];
+                    const dnMonth = extractMonthYearFromCell(dnDateCell, dnUserCell);
+
+                    if (selectedMonth === 'ALL' || dnMonth === selectedMonth) {
+                        const dnOp = extractOperator(dnUserCell?.v);
+                        if (isValidOperator(dnOp)) {
+                            const u = ensureUser(dnOp);
+                            const amt = parseValToNum(r.c[19]?.f || r.c[19]?.v);
+                            u.returnCount++;
+                            u.returnAmount += amt;
+                            u.platforms[platformKey]++;
+                            u.platformReturnsCount[platformKey]++;
+                            u.platformReturnsAmount[platformKey] += amt;
+
+                            const dk = extractDateKey(dnUserCell, dnDateCell);
+                            const dayEntry = ensureDailyEntry(u, dk);
+                            if (dayEntry) {
+                                dayEntry.returns++;
+                                dayEntry.returnAmt += amt;
+                                dayEntry.platforms[platformKey].returns++;
+                                dayEntry.platforms[platformKey].returnAmt += amt;
+                            }
+
+                            const h_dn = extractHour(dnUserCell);
+                            if (h_dn !== null) {
+                                u.hourlyDistribution[h_dn]++;
+                                teamHourlyDistribution[h_dn]++;
+                                if (dk) {
+                                    if (!u.dayWorkedHours[dk]) u.dayWorkedHours[dk] = new Set();
+                                    u.dayWorkedHours[dk].add(h_dn);
+                                }
+                                if (dayEntry) dayEntry.hourly[h_dn]++;
+                            }
+
+                            const dnRef = r.c[13]?.v || r.c[14]?.v || 'N/A';
+                            if (amt > 2000) {
+                                const item = { date: dk || 'N/A', op: dnOp, platform: platformKey, ref: dnRef, amt, issue: 'High-Value Return (>₹2,000)', type: 'high-ret' };
+                                u.auditAlerts.push(item);
+                                globalAuditAlerts.push(item);
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }
 
-    // 2. Process Returns Data
-    const processReturn = (opCell, amtVal, platformKey, fallbackDateCell) => {
-        let op = extractOperator(opCell?.v);
-        if (op) op = op.trim().toUpperCase();
-        if (isValidOperator(op)) {
-            const u = ensureUser(op);
-            const amt = parseValToNum(amtVal);
-            u.returnCount++;
-            u.returnAmount += amt;
-            u.platforms[platformKey]++;
-            u.platformReturnsCount[platformKey]++;
-            u.platformReturnsAmount[platformKey] += amt;
+    // ==========================================
+    // 2. PROCESS MONTHLY RESULTS (IF ACTIVE)
+    // ==========================================
+    if (monthlyResults) {
+        let allReport = null;
+        let monthlyData = null;
+        let allReturnReport = null;
+        let monthlyReturnData = null;
 
-            const dk = extractDateKey(opCell, fallbackDateCell);
-            const dayEntry = ensureDailyEntry(u, dk);
-            if (dayEntry) {
-                dayEntry.returns++;
-
-                // Track platform breakdown for this day
-                const pInfo = dayEntry.platforms[platformKey];
-                pInfo.returns++;
-                pInfo.returnAmt += amt;
-            }
-        }
-    };
-
-    if (monthlyReturnData && monthlyReturnData.rows) {
-        monthlyReturnData.rows.forEach(row => {
-            if (!row || !row.c) return;
-            
-            // Amazon CN
-            if (extractMonthYearFromCell(row.c[0], row.c[9]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[0], row.c[9]) === selectedMonth)) {
-                processReturn(row.c[9], row.c[7]?.v, 'amz', row.c[0]);
-            }
-            // Amazon DN
-            if (extractMonthYearFromCell(row.c[13], row.c[22]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[13], row.c[22]) === selectedMonth)) {
-                processReturn(row.c[22], row.c[20]?.v, 'amz', row.c[13]);
-            }
-            // Ajio CN
-            if (extractMonthYearFromCell(row.c[26], row.c[35]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[26], row.c[35]) === selectedMonth)) {
-                processReturn(row.c[35], row.c[33]?.v, 'ajio', row.c[26]);
-            }
-            // Ajio DN
-            if (extractMonthYearFromCell(row.c[39], row.c[48]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[39], row.c[48]) === selectedMonth)) {
-                processReturn(row.c[48], row.c[46]?.v, 'ajio', row.c[39]);
-            }
-            // Myntra CN
-            if (extractMonthYearFromCell(row.c[52], row.c[61]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[52], row.c[61]) === selectedMonth)) {
-                processReturn(row.c[61], row.c[59]?.v, 'myn', row.c[52]);
-            }
-            // Myntra DN
-            if (extractMonthYearFromCell(row.c[55], row.c[74]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[55], row.c[74]) === selectedMonth)) {
-                processReturn(row.c[74], row.c[72]?.v, 'myn', row.c[55]);
-            }
-            // Flipkart CN
-            if (extractMonthYearFromCell(row.c[78], row.c[87]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[78], row.c[87]) === selectedMonth)) {
-                processReturn(row.c[87], row.c[85]?.v, 'fk', row.c[78]);
-            }
-            // Flipkart DN
-            if (extractMonthYearFromCell(row.c[91], row.c[100]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[91], row.c[100]) === selectedMonth)) {
-                processReturn(row.c[100], row.c[98]?.v, 'fk', row.c[91]);
-            }
+        monthlyResults.forEach(res => {
+            const parsed = parseRawGvizJson(res.text);
+            if (res.tab === 'ALL REPORT') allReport = parsed;
+            if (res.tab === 'MONTHLY DATA') monthlyData = parsed;
+            if (res.tab === 'ALL RETURN REPORT') allReturnReport = parsed;
+            if (res.tab === 'MONTHLY RETURN DATA') monthlyReturnData = parsed;
         });
+
+        // Monthly Invoices
+        if (monthlyData && monthlyData.rows) {
+            const processMonthlyInvoice = (opCell, defaultUser, saleVal, purchaseVal, statusVal, platformKey, fallbackDateCell, saleQtyVal, purchaseQtyVal) => {
+                let op = extractOperator(opCell?.v) || defaultUser;
+                if (isValidOperator(op)) {
+                    const u = ensureUser(op);
+                    const amt = parseValToNum(saleVal);
+                    const pAmt = parseValToNum(purchaseVal);
+                    const sQty = parseValToNum(saleQtyVal) || 1;
+                    const pQty = parseValToNum(purchaseQtyVal) || 1;
+
+                    u.salesCount++;
+                    u.salesAmount += amt;
+                    u.purchaseAmount += pAmt;
+                    u.salesQty += sQty;
+                    u.purchaseQty += pQty;
+
+                    u.platforms[platformKey]++;
+                    u.platformInvoicesCount[platformKey]++;
+                    u.platformSales[platformKey] += amt;
+                    u.platformPurchases[platformKey] += pAmt;
+                    u.platformSalesQty[platformKey] += sQty;
+                    u.platformPurchasesQty[platformKey] += pQty;
+
+                    let isDispute = false;
+                    if (statusVal) {
+                        const st = String(statusVal).toUpperCase();
+                        if (st.includes('DISPUTE') || st.includes('HOLD') || st.includes('REJECT')) {
+                            u.disputes++;
+                            isDispute = true;
+                        }
+                    }
+
+                    const dk = extractDateKey(opCell, fallbackDateCell);
+                    const dayEntry = ensureDailyEntry(u, dk);
+                    if (dayEntry) {
+                        dayEntry.invoices++;
+                        dayEntry.amount += amt;
+                        dayEntry.purchaseAmount += pAmt;
+                        dayEntry.grossProfit += (amt - pAmt);
+                        if (isDispute) dayEntry.disputes++;
+
+                        const pInfo = dayEntry.platforms[platformKey];
+                        pInfo.invoices++;
+                        pInfo.sale += amt;
+                        pInfo.purchase += pAmt;
+                        pInfo.saleQty += sQty;
+                        pInfo.purchaseQty += pQty;
+                    }
+
+                    const h = extractHour(opCell);
+                    if (h !== null) {
+                        u.hourlyDistribution[h]++;
+                        teamHourlyDistribution[h]++;
+                        if (dk) {
+                            if (!u.dayWorkedHours[dk]) u.dayWorkedHours[dk] = new Set();
+                            u.dayWorkedHours[dk].add(h);
+                        }
+                        if (dayEntry) dayEntry.hourly[h]++;
+                    }
+
+                    if (amt > 2500) {
+                        const item = { date: dk || 'N/A', op, platform: platformKey, ref: 'MONTHLY', amt, issue: 'High-Value Invoice (>₹2,500)', type: 'high-inv' };
+                        u.auditAlerts.push(item);
+                        globalAuditAlerts.push(item);
+                    }
+                    if (amt > 0 && pAmt === 0) {
+                        const item = { date: dk || 'N/A', op, platform: platformKey, ref: 'MONTHLY', amt, issue: 'Missing Purchase Cost (₹0 Cost)', type: 'zero-purch' };
+                        u.auditAlerts.push(item);
+                        globalAuditAlerts.push(item);
+                    }
+                    if (isDispute) {
+                        const item = { date: dk || 'N/A', op, platform: platformKey, ref: 'MONTHLY', amt, issue: `Disputed / Flagged (${String(statusVal || '').slice(0, 30)})`, type: 'dispute' };
+                        u.auditAlerts.push(item);
+                        globalAuditAlerts.push(item);
+                    }
+                }
+            };
+
+            monthlyData.rows.forEach(row => {
+                if (!row || !row.c) return;
+
+                // Amazon (Offset 0)
+                const amzM = extractMonthYearFromCell(row.c[0], row.c[15]);
+                if (amzM && (selectedMonth === 'ALL' || amzM === selectedMonth)) {
+                    const user = row.c[18] ? String(row.c[18].v || '').trim().toUpperCase() : null;
+                    processMonthlyInvoice(row.c[15], user, row.c[6]?.v, row.c[13]?.v, row.c[16]?.v, 'amz', row.c[0], row.c[5]?.v, row.c[12]?.v);
+                }
+                
+                // Ajio (Offset 21)
+                const ajioM = extractMonthYearFromCell(row.c[21], row.c[36]);
+                if (ajioM && (selectedMonth === 'ALL' || ajioM === selectedMonth)) {
+                    processMonthlyInvoice(row.c[36], null, row.c[27]?.v, row.c[34]?.v, row.c[37]?.v, 'ajio', row.c[21], row.c[26]?.v, row.c[33]?.v);
+                }
+                
+                // Myntra (Offset 42)
+                const mynM = extractMonthYearFromCell(row.c[42], row.c[57]);
+                if (mynM && (selectedMonth === 'ALL' || mynM === selectedMonth)) {
+                    processMonthlyInvoice(row.c[57], null, row.c[48]?.v, row.c[55]?.v, row.c[58]?.v, 'myn', row.c[42], row.c[47]?.v, row.c[54]?.v);
+                }
+                
+                // Flipkart (Offset 62)
+                const fkM = extractMonthYearFromCell(row.c[62], row.c[77]);
+                if (fkM && (selectedMonth === 'ALL' || fkM === selectedMonth)) {
+                    const user = row.c[80] ? String(row.c[80].v || '').trim().toUpperCase() : null;
+                    processMonthlyInvoice(row.c[77], user, row.c[68]?.v, row.c[75]?.v, row.c[78]?.v, 'fk', row.c[62], row.c[67]?.v, row.c[74]?.v);
+                }
+            });
+        }
+
+        // Monthly Returns
+        if (monthlyReturnData && monthlyReturnData.rows) {
+            const processMonthlyReturn = (opCell, amtVal, platformKey, fallbackDateCell) => {
+                let op = extractOperator(opCell?.v);
+                if (isValidOperator(op)) {
+                    const u = ensureUser(op);
+                    const amt = parseValToNum(amtVal);
+                    u.returnCount++;
+                    u.returnAmount += amt;
+                    u.platforms[platformKey]++;
+                    u.platformReturnsCount[platformKey]++;
+                    u.platformReturnsAmount[platformKey] += amt;
+
+                    const dk = extractDateKey(opCell, fallbackDateCell);
+                    const dayEntry = ensureDailyEntry(u, dk);
+                    if (dayEntry) {
+                        dayEntry.returns++;
+                        dayEntry.returnAmt += amt;
+                        dayEntry.platforms[platformKey].returns++;
+                        dayEntry.platforms[platformKey].returnAmt += amt;
+                    }
+
+                    const h = extractHour(opCell);
+                    if (h !== null) {
+                        u.hourlyDistribution[h]++;
+                        teamHourlyDistribution[h]++;
+                        if (dk) {
+                            if (!u.dayWorkedHours[dk]) u.dayWorkedHours[dk] = new Set();
+                            u.dayWorkedHours[dk].add(h);
+                        }
+                        if (dayEntry) dayEntry.hourly[h]++;
+                    }
+
+                    if (amt > 2000) {
+                        const item = { date: dk || 'N/A', op, platform: platformKey, ref: 'MONTHLY', amt, issue: 'High-Value Return (>₹2,000)', type: 'high-ret' };
+                        u.auditAlerts.push(item);
+                        globalAuditAlerts.push(item);
+                    }
+                }
+            };
+
+            monthlyReturnData.rows.forEach(row => {
+                if (!row || !row.c) return;
+                // Amazon CN / DN
+                if (extractMonthYearFromCell(row.c[0], row.c[9]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[0], row.c[9]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[9], row.c[7]?.v, 'amz', row.c[0]);
+                }
+                if (extractMonthYearFromCell(row.c[13], row.c[22]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[13], row.c[22]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[22], row.c[20]?.v, 'amz', row.c[13]);
+                }
+                // Ajio CN / DN
+                if (extractMonthYearFromCell(row.c[26], row.c[35]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[26], row.c[35]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[35], row.c[33]?.v, 'ajio', row.c[26]);
+                }
+                if (extractMonthYearFromCell(row.c[39], row.c[48]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[39], row.c[48]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[48], row.c[46]?.v, 'ajio', row.c[39]);
+                }
+                // Myntra CN / DN
+                if (extractMonthYearFromCell(row.c[52], row.c[61]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[52], row.c[61]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[61], row.c[59]?.v, 'myn', row.c[52]);
+                }
+                if (extractMonthYearFromCell(row.c[55], row.c[74]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[55], row.c[74]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[74], row.c[72]?.v, 'myn', row.c[55]);
+                }
+                // Flipkart CN / DN
+                if (extractMonthYearFromCell(row.c[78], row.c[87]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[78], row.c[87]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[87], row.c[85]?.v, 'fk', row.c[78]);
+                }
+                if (extractMonthYearFromCell(row.c[91], row.c[100]) && (selectedMonth === 'ALL' || extractMonthYearFromCell(row.c[91], row.c[100]) === selectedMonth)) {
+                    processMonthlyReturn(row.c[100], row.c[98]?.v, 'fk', row.c[91]);
+                }
+            });
+        }
     }
 
-    // Save selected month to state so we know it on re-sort
     state.selectedUserMonth = selectedMonth || 'ALL';
 
-    // 3. Compile list, sort, and rank
+    // ==========================================
+    // 3. COMPILE, CALCULATE & RANK OPERATORS
+    // ==========================================
     const operatorList = Object.values(users);
-    
-    // First calculate base metrics for sorting
+    const formatHourLabel = (h) => {
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 === 0 ? 12 : h % 12;
+        return `${h12} ${ampm}`;
+    };
+
+    let teamGrossProfit = 0;
+    let teamSalesAmt = 0;
+
     operatorList.forEach(u => {
+        u.totalTx = u.salesCount + u.returnCount;
+        u.totalValue = u.salesAmount + u.returnAmount;
+        u.grossProfit = u.salesAmount - u.purchaseAmount;
+        u.profitMargin = u.salesAmount > 0 ? parseFloat(((u.grossProfit / u.salesAmount) * 100).toFixed(1)) : 0;
+        teamGrossProfit += u.grossProfit;
+        teamSalesAmt += u.salesAmount;
+
         u.disputeRate = u.salesCount > 0 ? parseFloat(((u.disputes / u.salesCount) * 100).toFixed(1)) : 0;
         u.accuracyRate = 100 - u.disputeRate;
-        u.avgValue = u.salesCount > 0 ? u.salesAmount / u.salesCount : 0;
+        u.avgValue = u.salesCount > 0 ? (u.salesAmount / u.salesCount) : (u.returnCount > 0 ? (u.returnAmount / u.returnCount) : 0);
+
+        // Calculate actual worked hours & velocity
+        let workedHrs = 0;
+        Object.values(u.dayWorkedHours || {}).forEach(s => {
+            workedHrs += s.size;
+        });
+        if (workedHrs === 0) {
+            workedHrs = Math.max(1, Object.keys(u.dailyLog || {}).length * 6);
+        }
+        u.workedHours = workedHrs;
+        u.speedPerHour = Math.round(u.totalTx / u.workedHours);
+
+        // Peak hour
+        let peakH = 0;
+        let peakCount = 0;
+        u.hourlyDistribution.forEach((cnt, hr) => {
+            if (cnt > peakCount) {
+                peakCount = cnt;
+                peakH = hr;
+            }
+        });
+        u.peakHourStr = peakCount > 0 ? `${formatHourLabel(peakH)} - ${formatHourLabel((peakH + 1) % 24)}` : 'N/A';
+        u.peakHourCount = peakCount;
     });
 
-    const sortKey = document.getElementById('leaderboard-sort-select')?.value || 'salesAmount';
-    if (sortKey === 'salesAmount') {
+    const sortKey = document.getElementById('leaderboard-sort-select')?.value || 'totalVolume';
+    if (sortKey === 'totalVolume') {
+        operatorList.sort((a, b) => b.totalTx - a.totalTx || b.totalValue - a.totalValue);
+    } else if (sortKey === 'totalValue') {
+        operatorList.sort((a, b) => b.totalValue - a.totalValue || b.totalTx - a.totalTx);
+    } else if (sortKey === 'salesAmount') {
         operatorList.sort((a, b) => b.salesAmount - a.salesAmount);
+    } else if (sortKey === 'grossProfit') {
+        operatorList.sort((a, b) => b.grossProfit - a.grossProfit || b.salesAmount - a.salesAmount);
     } else if (sortKey === 'salesCount') {
         operatorList.sort((a, b) => b.salesCount - a.salesCount);
-    } else if (sortKey === 'accuracy') {
-        operatorList.sort((a, b) => b.accuracyRate - a.accuracyRate || b.salesAmount - a.salesAmount);
     } else if (sortKey === 'returnCount') {
-        operatorList.sort((a, b) => b.returnCount - a.returnCount || b.salesAmount - a.salesAmount);
+        operatorList.sort((a, b) => b.returnCount - a.returnCount);
+    } else if (sortKey === 'returnAmount') {
+        operatorList.sort((a, b) => b.returnAmount - a.returnAmount);
+    } else if (sortKey === 'accuracy') {
+        operatorList.sort((a, b) => b.accuracyRate - a.accuracyRate || b.totalTx - a.totalTx);
     }
+
+    const platformNames = { amz: 'Amazon', ajio: 'Ajio', myn: 'Myntra', fk: 'Flipkart' };
+    const platformColors = { amz: '#ff9900', ajio: '#10b981', myn: '#f43f5e', fk: '#0284c7' };
 
     let totalVolumeCount = 0;
     let avgDisputeRateSum = 0;
+    let validDisputeOps = 0;
     
     operatorList.forEach((u, index) => {
         u.rank = index + 1;
-        totalVolumeCount += (u.salesCount + u.returnCount);
-        avgDisputeRateSum += u.disputeRate;
-
-        // Marketplace Specialty Badge
-        const totalPlatformTx = u.platforms.amz + u.platforms.ajio + u.platforms.myn + u.platforms.fk;
-        const platformNames = { amz: 'Amazon', ajio: 'Ajio', myn: 'Myntra', fk: 'Flipkart' };
-        const platformColors = { amz: '#ff9900', ajio: '#10b981', myn: '#f43f5e', fk: '#0083ca' };
-        let maxPlatform = 'amz';
-        let maxPlatformCount = 0;
-        for (const pk of ['amz', 'ajio', 'myn', 'fk']) {
-            if (u.platforms[pk] > maxPlatformCount) {
-                maxPlatformCount = u.platforms[pk];
-                maxPlatform = pk;
-            }
+        totalVolumeCount += u.totalTx;
+        if (u.salesCount > 0) {
+            avgDisputeRateSum += u.disputeRate;
+            validDisputeOps++;
         }
-        const dominanceRatio = totalPlatformTx > 0 ? maxPlatformCount / totalPlatformTx : 0;
-        if (dominanceRatio > 0.6) {
-            u.specialty = `${platformNames[maxPlatform]} Pro`;
-            u.specialtyColor = platformColors[maxPlatform];
+
+        // Specialty Badge
+        const totalPlatformTx = u.platforms.amz + u.platforms.ajio + u.platforms.myn + u.platforms.fk;
+        
+        if (u.returnCount > u.salesCount && u.returnCount > 0) {
+            let maxRetPlatform = 'myn';
+            let maxRetCount = -1;
+            for (const pk of ['amz', 'ajio', 'myn', 'fk']) {
+                const count = (u.platformReturnsCount && u.platformReturnsCount[pk]) || 0;
+                if (count > maxRetCount) {
+                    maxRetCount = count;
+                    maxRetPlatform = pk;
+                }
+            }
+            if (maxRetCount > 0) {
+                u.specialty = `${platformNames[maxRetPlatform]} Return Pro`;
+                u.specialtyColor = platformColors[maxRetPlatform];
+            } else {
+                u.specialty = 'Return Pro';
+                u.specialtyColor = '#f43f5e';
+            }
         } else {
-            u.specialty = 'Generalist';
-            u.specialtyColor = '#8b5cf6';
+            let maxPlatform = 'myn';
+            let maxPlatformCount = 0;
+            for (const pk of ['amz', 'ajio', 'myn', 'fk']) {
+                const count = (u.platformInvoicesCount && u.platformInvoicesCount[pk] !== undefined)
+                    ? u.platformInvoicesCount[pk] 
+                    : (u.platforms[pk] || 0);
+                if (count > maxPlatformCount) {
+                    maxPlatformCount = count;
+                    maxPlatform = pk;
+                }
+            }
+            const dominanceRatio = u.salesCount > 0 ? (maxPlatformCount / u.salesCount) : (totalPlatformTx > 0 ? maxPlatformCount / totalPlatformTx : 0);
+            if (dominanceRatio >= 0.5 && maxPlatformCount > 0) {
+                u.specialty = `${platformNames[maxPlatform]} Pro`;
+                u.specialtyColor = platformColors[maxPlatform];
+            } else {
+                u.specialty = 'Generalist';
+                u.specialtyColor = '#8b5cf6';
+            }
         }
 
         // Ratings
         if (u.disputeRate <= 2) {
             u.grade = 'A';
             u.badge = '🏆 Gold Star';
-            u.badgeColor = '#eab308'; // Gold
+            u.badgeColor = '#eab308';
         } else if (u.disputeRate <= 5) {
             u.grade = 'B';
             u.badge = '⭐ Silver Star';
-            u.badgeColor = '#94a3b8'; // Silver
+            u.badgeColor = '#94a3b8';
         } else {
             u.grade = 'C';
             u.badge = '⚠️ Risk Alert';
-            u.badgeColor = '#ef4444'; // Red
+            u.badgeColor = '#ef4444';
         }
     });
 
-    const avgAccuracyRate = operatorList.length > 0 ? (100 - (avgDisputeRateSum / operatorList.length)).toFixed(1) + "%" : "100%";
+    const avgAccuracyRate = validDisputeOps > 0 ? (100 - (avgDisputeRateSum / validDisputeOps)).toFixed(1) + "%" : "100%";
+    const teamMargin = teamSalesAmt > 0 ? ((teamGrossProfit / teamSalesAmt) * 100).toFixed(1) : '0.0';
 
     // 4. Update KPI Cards
     document.getElementById('user-kpi-active-users').textContent = operatorList.length;
     document.getElementById('user-kpi-top-operator').textContent = operatorList.length > 0 ? operatorList[0].name : 'N/A';
     document.getElementById('user-kpi-total-volume').textContent = totalVolumeCount.toLocaleString();
     document.getElementById('user-kpi-avg-accuracy').textContent = avgAccuracyRate;
+    const gpEl = document.getElementById('user-kpi-gross-profit');
+    if (gpEl) {
+        gpEl.textContent = `₹${Math.round(teamGrossProfit).toLocaleString()} (${teamMargin}%)`;
+    }
+
+    // 4B. Update Smart Audit Alerts
+    const highInvCount = globalAuditAlerts.filter(a => a.type === 'high-inv').length;
+    const zeroPurchCount = globalAuditAlerts.filter(a => a.type === 'zero-purch').length;
+    const highRetCount = globalAuditAlerts.filter(a => a.type === 'high-ret').length;
+    const disputeAlertCount = globalAuditAlerts.filter(a => a.type === 'dispute').length;
+
+    const pillHighInv = document.getElementById('audit-pill-high-inv');
+    const pillZeroPurch = document.getElementById('audit-pill-zero-purch');
+    const pillHighRet = document.getElementById('audit-pill-high-ret');
+    const pillDisputes = document.getElementById('audit-pill-disputes');
+
+    if (pillHighInv) pillHighInv.textContent = `💎 ${highInvCount} High Invoices`;
+    if (pillZeroPurch) pillZeroPurch.textContent = `⚠️ ${zeroPurchCount} Missing Cost`;
+    if (pillHighRet) pillHighRet.textContent = `📦 ${highRetCount} High Returns`;
+    if (pillDisputes) pillDisputes.textContent = `🚩 ${disputeAlertCount} Disputed`;
+
+    const auditTbody = document.getElementById('user-audit-log-tbody');
+    if (auditTbody) {
+        auditTbody.innerHTML = '';
+        if (globalAuditAlerts.length === 0) {
+            auditTbody.innerHTML = '<tr><td colspan="6" style="padding: 16px; text-align: center; color: #10b981; font-weight: 600;">✅ Zero anomalies detected! All transactions are within clean thresholds.</td></tr>';
+        } else {
+            // Sort by amount descending, take top 50
+            const topAlerts = [...globalAuditAlerts].sort((a, b) => b.amt - a.amt).slice(0, 50);
+            topAlerts.forEach(al => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+                const badgeColor = al.type === 'zero-purch' ? '#ef4444' : al.type === 'high-ret' ? '#f43f5e' : al.type === 'dispute' ? '#f59e0b' : '#6366f1';
+                tr.innerHTML = `
+                    <td style="padding: 8px; color: var(--text-color);">${al.date}</td>
+                    <td style="padding: 8px; font-weight: 700; color: var(--text-title);">${al.op}</td>
+                    <td style="padding: 8px; color: ${platformColors[al.platform] || '#94a3b8'}; font-weight: 600;">${platformNames[al.platform] || al.platform}</td>
+                    <td style="padding: 8px; color: var(--text-muted); font-family: monospace;">${al.ref}</td>
+                    <td style="padding: 8px; text-align: right; font-weight: 700; color: var(--text-title);">₹${Math.round(al.amt).toLocaleString()}</td>
+                    <td style="padding: 8px;"><span style="padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; background: ${badgeColor}20; color: ${badgeColor}; border: 1px solid ${badgeColor}40;">${al.issue}</span></td>
+                `;
+                auditTbody.appendChild(tr);
+            });
+        }
+    }
+
+    const toggleAuditBtn = document.getElementById('btn-toggle-audit-log');
+    if (toggleAuditBtn) {
+        toggleAuditBtn.onclick = () => {
+            const drawer = document.getElementById('user-audit-log-drawer');
+            const arrow = document.getElementById('audit-toggle-arrow');
+            if (drawer) {
+                const isHidden = drawer.classList.toggle('hidden');
+                if (arrow) arrow.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(180deg)';
+            }
+        };
+    }
 
     // 5. Populate Leaderboard Table
     const tbody = document.getElementById('user-leaderboard-tbody');
     tbody.innerHTML = '';
 
     if (operatorList.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="padding: 24px; text-align: center; color: var(--text-muted);">No operator data found for this month filter.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="padding: 24px; text-align: center; color: var(--text-muted);">No operator data found for this selection.</td></tr>';
     } else {
         operatorList.forEach(u => {
             const tr = document.createElement('tr');
@@ -4546,7 +5165,6 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
                 if (!tr.classList.contains('active-user-row')) tr.style.backgroundColor = '';
             });
             tr.addEventListener('click', () => {
-                // Remove previous active highlight
                 document.querySelectorAll('#user-leaderboard-tbody tr.active-user-row').forEach(r => {
                     r.classList.remove('active-user-row');
                     r.style.backgroundColor = '';
@@ -4556,12 +5174,31 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
                 showOperatorDailyLog(u);
             });
 
-            // Compute tooltip descriptions
             let specialtyDesc = '';
-            if (u.specialty === 'Generalist') {
+            if (u.specialty.includes('Return Pro')) {
+                const platName = u.specialty.replace(' Return Pro', '').trim();
+                const retPk = Object.keys(platformNames).find(k => platformNames[k] === platName);
+                if (retPk && u.platformReturnsCount) {
+                    const count = u.platformReturnsCount[retPk] || 0;
+                    const pct = u.returnCount > 0 ? ((count / u.returnCount) * 100).toFixed(1) : '0.0';
+                    specialtyDesc = `Return Specialist: Primarily handles ${platName} returns (${count.toLocaleString()} returns, ${pct}% of total returns)`;
+                } else {
+                    specialtyDesc = 'Specializes primarily in Credit Note and Debit Note returns';
+                }
+            } else if (u.specialty === 'Generalist') {
                 specialtyDesc = 'Processes balanced volume across all marketplaces';
             } else {
-                specialtyDesc = `Processes ${u.specialty.replace(' Pro', '')} invoices predominantly (>60% of total)`;
+                const platName = u.specialty.replace(' Pro', '').trim();
+                const platPk = Object.keys(platformNames).find(k => platformNames[k] === platName);
+                if (platPk) {
+                    const count = (u.platformInvoicesCount && u.platformInvoicesCount[platPk] !== undefined)
+                        ? u.platformInvoicesCount[platPk]
+                        : (u.platforms[platPk] || 0);
+                    const pct = u.salesCount > 0 ? ((count / u.salesCount) * 100).toFixed(1) : '0.0';
+                    specialtyDesc = `Invoice Specialist: Primarily processes ${platName} invoices (${count.toLocaleString()} invoices, ${pct}% of total invoices)`;
+                } else {
+                    specialtyDesc = `Processes ${platName} transactions predominantly`;
+                }
             }
 
             let gradeDesc = '';
@@ -4573,11 +5210,18 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
                 gradeDesc = 'Risk Alert: Low accuracy rate (Disputes > 5%)';
             }
 
+            const gpHtml = u.salesAmount > 0 
+                ? `₹${Math.round(u.grossProfit).toLocaleString()} <span style="font-size: 11px; color: #34d399; font-weight: 600;">(${u.profitMargin}%)</span>`
+                : `<span style="color: var(--text-muted); font-size: 11px;">—</span>`;
+
             tr.innerHTML = `
                 <td style="padding: 12px; text-align: center; font-weight: 700; color: ${u.rank === 1 ? '#eab308' : u.rank === 2 ? '#94a3b8' : u.rank === 3 ? '#cd7f32' : 'var(--text-color)'};">${u.rank <= 3 ? ['🥇','🥈','🥉'][u.rank-1] : u.rank}</td>
                 <td style="padding: 12px; font-weight: 600; color: var(--text-title);">${u.name}</td>
                 <td style="padding: 12px; text-align: right; font-weight: 700; color: #10b981;">₹${u.salesAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
-                <td style="padding: 12px; text-align: center; color: var(--text-color);">${u.salesCount}</td>
+                <td style="padding: 12px; text-align: right; font-weight: 700; color: #10b981;">${gpHtml}</td>
+                <td style="padding: 12px; text-align: center; color: var(--text-color); font-weight: 600;">${u.salesCount.toLocaleString()}</td>
+                <td style="padding: 12px; text-align: center; color: var(--text-color); font-weight: 600;">${u.returnCount.toLocaleString()}</td>
+                <td style="padding: 12px; text-align: right; font-weight: 700; color: #f43f5e;">₹${u.returnAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                 <td style="padding: 12px; text-align: right; font-weight: 600; color: #06b6d4;">₹${u.avgValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                 <td style="padding: 12px; text-align: center; color: var(--text-muted);"><span style="font-weight: 600; color: ${u.disputes > 0 ? '#ef4444' : '#10b981'};">${u.disputes}</span> <span style="font-size: 11px;">(${u.disputeRate}%)</span></td>
                 <td style="padding: 12px; text-align: center;"><span title="${specialtyDesc}" style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid ${u.specialtyColor}40; color: ${u.specialtyColor}; background: ${u.specialtyColor}15; cursor: help;">${u.specialty}</span></td>
@@ -4597,7 +5241,7 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
         op1Select.innerHTML = '';
         op2Select.innerHTML = '';
 
-        operatorList.forEach((o, i) => {
+        operatorList.forEach((o) => {
             const opt1 = document.createElement('option');
             opt1.value = o.name;
             opt1.textContent = o.name;
@@ -4609,7 +5253,6 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
             op2Select.appendChild(opt2);
         });
 
-        // Restore selection or pick defaults
         if (prev1 && operatorList.some(o => o.name === prev1)) {
             op1Select.value = prev1;
         } else if (operatorList.length > 0) {
@@ -4625,8 +5268,7 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
 
     // Wire compare action
     const compareBtn = document.getElementById('btn-compare-operators');
-    if (compareBtn && !compareBtn.dataset.wired) {
-        compareBtn.dataset.wired = 'true';
+    if (compareBtn) {
         compareBtn.onclick = () => {
             const opName1 = document.getElementById('compare-op1-select')?.value;
             const opName2 = document.getElementById('compare-op2-select')?.value;
@@ -4640,6 +5282,10 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
             if (resultsContainer) resultsContainer.classList.remove('hidden');
 
             const makeCompareCard = (u, isWinnerMap) => {
+                const gpHtml = u.salesAmount > 0 
+                    ? `₹${Math.round(u.grossProfit).toLocaleString()} <span style="font-size: 11px; color: #34d399; font-weight: 600;">(${u.profitMargin}%)</span>`
+                    : `<span style="color: var(--text-muted); font-size: 11px;">—</span>`;
+
                 return `
                     <div style="text-align: center; margin-bottom: 12px;">
                         <h4 style="font-size: 16px; font-weight: 700; color: var(--text-title); margin: 0 0 4px 0;">${u.name}</h4>
@@ -4647,20 +5293,40 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
                         <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Total Processed:</span>
+                            <strong style="color: #6366f1; font-weight: 700;">${u.totalTx.toLocaleString()} ${isWinnerMap.totalTx ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Hourly Speed:</span>
+                            <strong style="color: #8b5cf6; font-weight: 700;">${u.speedPerHour || 0} Tx/Hr ${isWinnerMap.speedPerHour ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Peak Window:</span>
+                            <strong style="color: #818cf8; font-weight: 600;">${u.peakHourStr || '10 AM - 6 PM'}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
                             <span style="color: var(--text-muted);">Sales Processed:</span>
                             <strong style="color: #10b981; font-weight: 700;">₹${Math.round(u.salesAmount).toLocaleString()} ${isWinnerMap.salesAmount ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Gross Profit:</span>
+                            <strong style="color: #10b981; font-weight: 700;">${gpHtml} ${isWinnerMap.grossProfit ? '🏆' : ''}</strong>
                         </div>
                         <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
                             <span style="color: var(--text-muted);">Invoices Processed:</span>
                             <strong style="color: var(--text-title); font-weight: 700;">${u.salesCount.toLocaleString()} ${isWinnerMap.salesCount ? '🏆' : ''}</strong>
                         </div>
                         <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
-                            <span style="color: var(--text-muted);">Average Invoice Value:</span>
-                            <strong style="color: #06b6d4; font-weight: 700;">₹${Math.round(u.avgValue).toLocaleString()} ${isWinnerMap.avgValue ? '🏆' : ''}</strong>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
                             <span style="color: var(--text-muted);">Returns Handled:</span>
                             <strong style="color: var(--text-title); font-weight: 700;">${u.returnCount.toLocaleString()} ${isWinnerMap.returnCount ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Return Value:</span>
+                            <strong style="color: #f43f5e; font-weight: 700;">₹${Math.round(u.returnAmount).toLocaleString()} ${isWinnerMap.returnAmount ? '🏆' : ''}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+                            <span style="color: var(--text-muted);">Average Ticket Value:</span>
+                            <strong style="color: #06b6d4; font-weight: 700;">₹${Math.round(u.avgValue).toLocaleString()} ${isWinnerMap.avgValue ? '🏆' : ''}</strong>
                         </div>
                         <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
                             <span style="color: var(--text-muted);">Disputes Rate:</span>
@@ -4675,29 +5341,91 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
             };
 
             const isWinner1 = {
+                totalTx: u1.totalTx > u2.totalTx,
+                speedPerHour: (u1.speedPerHour || 0) > (u2.speedPerHour || 0),
                 salesAmount: u1.salesAmount > u2.salesAmount,
+                grossProfit: (u1.grossProfit || 0) > (u2.grossProfit || 0),
                 salesCount: u1.salesCount > u2.salesCount,
-                avgValue: u1.avgValue > u2.avgValue,
                 returnCount: u1.returnCount > u2.returnCount,
+                returnAmount: u1.returnAmount > u2.returnAmount,
+                avgValue: u1.avgValue > u2.avgValue,
                 disputeRate: u1.disputeRate < u2.disputeRate,
                 accuracyRate: u1.accuracyRate > u2.accuracyRate
             };
 
             const isWinner2 = {
+                totalTx: u2.totalTx > u1.totalTx,
+                speedPerHour: (u2.speedPerHour || 0) > (u1.speedPerHour || 0),
                 salesAmount: u2.salesAmount > u1.salesAmount,
+                grossProfit: (u2.grossProfit || 0) > (u1.grossProfit || 0),
                 salesCount: u2.salesCount > u1.salesCount,
-                avgValue: u2.avgValue > u1.avgValue,
                 returnCount: u2.returnCount > u1.returnCount,
+                returnAmount: u2.returnAmount > u1.returnAmount,
+                avgValue: u2.avgValue > u1.avgValue,
                 disputeRate: u2.disputeRate < u1.disputeRate,
                 accuracyRate: u2.accuracyRate > u1.accuracyRate
             };
 
             document.getElementById('compare-card-op1').innerHTML = makeCompareCard(u1, isWinner1);
             document.getElementById('compare-card-op2').innerHTML = makeCompareCard(u2, isWinner2);
+
+            // Render Radar Chart for Op1 vs Op2
+            const radarContainer = document.getElementById('compare-radar-container');
+            if (radarContainer) radarContainer.classList.remove('hidden');
+
+            const isDarkRadar = document.documentElement.getAttribute('data-theme') === 'dark';
+            const textRadarColor = isDarkRadar ? '#94a3b8' : '#64748b';
+            const tooltipRadarTheme = isDarkRadar ? 'dark' : 'light';
+
+            const maxTotalTx = Math.max(...operatorList.map(o => o.totalTx), 1);
+            const maxSales = Math.max(...operatorList.map(o => o.salesAmount || 0), 1);
+            const maxSpeed = Math.max(...operatorList.map(o => o.speedPerHour || 0), 1);
+
+            const calcRadarScore = (u) => {
+                const vol = Math.min(100, Math.round(((u.totalTx || 0) / maxTotalTx) * 100));
+                const spd = Math.min(100, Math.round(((u.speedPerHour || 0) / maxSpeed) * 100));
+                const val = Math.min(100, Math.round(((u.salesAmount || 0) / maxSales) * 100));
+                const acc = Math.min(100, Math.round(u.accuracyRate !== undefined ? u.accuracyRate : 100));
+                
+                let activePlats = 0;
+                ['amz', 'ajio', 'myn', 'fk'].forEach(pk => {
+                    if (u.platforms && u.platforms[pk] > 0) activePlats++;
+                });
+                const bothOps = (u.salesCount > 0 && u.returnCount > 0) ? 20 : 0;
+                const vers = Math.min(100, Math.round((activePlats / 4) * 80 + bothOps));
+                return [vol, spd, val, acc, vers];
+            };
+
+            const radarOptions = {
+                chart: {
+                    type: 'radar',
+                    height: 300,
+                    width: '100%',
+                    background: 'transparent',
+                    toolbar: { show: false },
+                    fontFamily: 'Inter, sans-serif'
+                },
+                series: [
+                    { name: u1.name, data: calcRadarScore(u1) },
+                    { name: u2.name, data: calcRadarScore(u2) }
+                ],
+                labels: ['Volume', 'Speed', 'Sales Value', 'Accuracy %', 'Versatility'],
+                colors: ['#6366f1', '#10b981'],
+                stroke: { width: 2 },
+                fill: { opacity: 0.25 },
+                markers: { size: 4 },
+                yaxis: { show: false, min: 0, max: 100 },
+                xaxis: { labels: { style: { colors: [textRadarColor, textRadarColor, textRadarColor, textRadarColor, textRadarColor], fontSize: '11px' } } },
+                legend: { position: 'bottom', labels: { colors: textRadarColor } },
+                tooltip: {
+                    theme: tooltipRadarTheme,
+                    y: { formatter: (val) => val + ' / 100' }
+                }
+            };
+            renderOrUpdateChart('compare-radar-chart', 'userCompareRadar', radarOptions);
         };
     }
 
-    // Hide user details panel when month filter changes
     const detailsPanel = document.getElementById('user-details-panel');
     if (detailsPanel) detailsPanel.classList.add('hidden');
 
@@ -4707,14 +5435,14 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
     const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
     const tooltipTheme = isDark ? 'dark' : 'light';
 
-    // Chart 1: Donut (Workload Share)
+    // Chart 1: Donut (Workload Share based on total transactions)
     const opNames = operatorList.map(o => o.name);
-    const opSalesCount = operatorList.map(o => o.salesCount);
+    const opTotalCount = operatorList.map(o => o.totalTx);
 
     const volumeShareOptions = {
         chart: { type: 'donut', height: 280, width: '100%', background: 'transparent', fontFamily: 'Inter, sans-serif' },
         labels: opNames,
-        series: opSalesCount,
+        series: opTotalCount,
         colors: ['#10b981', '#6366f1', '#f43f5e', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899'],
         legend: { position: 'bottom', labels: { colors: textColor } },
         tooltip: { theme: tooltipTheme },
@@ -4731,7 +5459,7 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
 
     const platformShareOptions = {
         chart: { type: 'bar', height: 280, width: '100%', stacked: true, toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
-        colors: ['#ff9900', '#10b981', '#f43f5e', '#0083ca'], // Amazon Orange, Ajio Green, Myntra Pink, Flipkart Blue
+        colors: ['#ff9900', '#10b981', '#f43f5e', '#0083ca'],
         grid: { borderColor: gridColor },
         plotOptions: { bar: { horizontal: true, barHeight: '55%', borderRadius: 4 } },
         xaxis: { categories: opNames, labels: { style: { colors: textColor } } },
@@ -4747,76 +5475,130 @@ function renderUserDashboard(selectedMonth, sortedMonths) {
     };
     renderOrUpdateChart('user-chart-platform-share', 'userPlatformShare', platformShareOptions);
 
-    // 5b. Compute and Draw Team Daily Productivity Trend
-    const teamDaily = {};
+    // Chart 3: Team Daily Productivity Trend (Invoices & Returns)
+    const teamDailyInvoices = {};
+    const teamDailyReturns = {};
+    const allDateKeys = new Set();
+
     operatorList.forEach(u => {
         if (u.dailyLog) {
             Object.entries(u.dailyLog).forEach(([dateKey, dayData]) => {
-                if (!teamDaily[dateKey]) {
-                    teamDaily[dateKey] = 0;
-                }
-                teamDaily[dateKey] += dayData.invoices;
+                allDateKeys.add(dateKey);
+                teamDailyInvoices[dateKey] = (teamDailyInvoices[dateKey] || 0) + (dayData.invoices || 0);
+                teamDailyReturns[dateKey] = (teamDailyReturns[dateKey] || 0) + (dayData.returns || 0);
             });
         }
     });
 
-    // Sort dates
-    const teamDailySorted = Object.entries(teamDaily)
-        .map(([dateKey, invoices]) => {
+    const teamDailySorted = Array.from(allDateKeys)
+        .map(dateKey => {
             const [d, m, y] = dateKey.split('-');
             return {
                 dateKey,
-                invoices,
+                invoices: teamDailyInvoices[dateKey] || 0,
+                returns: teamDailyReturns[dateKey] || 0,
                 sortDate: new Date(parseInt(y), parseInt(m) - 1, parseInt(d))
             };
         })
         .sort((a, b) => a.sortDate - b.sortDate);
 
     const teamDailyDates = teamDailySorted.map(item => item.dateKey);
-    const teamDailyInvoices = teamDailySorted.map(item => item.invoices);
+    const teamSeriesInvoices = teamDailySorted.map(item => item.invoices);
+    const teamSeriesReturns = teamDailySorted.map(item => item.returns);
 
     const teamTrendOptions = {
-        chart: { 
-            type: 'area', 
-            height: 280, 
-            width: '100%', 
-            toolbar: { show: false }, 
-            background: 'transparent', 
-            fontFamily: 'Inter, sans-serif' 
-        },
-        colors: ['#6366f1'],
+        chart: { type: 'area', height: 280, width: '100%', toolbar: { show: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        colors: ['#6366f1', '#10b981'],
         stroke: { curve: 'smooth', width: 2 },
         fill: {
             type: 'gradient',
-            gradient: {
-                shadeIntensity: 1,
-                opacityFrom: 0.35,
-                opacityTo: 0.05,
-                stops: [0, 90, 100]
-            }
+            gradient: { shadeIntensity: 1, opacityFrom: 0.35, opacityTo: 0.05, stops: [0, 90, 100] }
         },
         grid: { borderColor: gridColor },
-        xaxis: { 
-            categories: teamDailyDates, 
-            labels: { style: { colors: textColor } } 
-        },
-        yaxis: { 
-            labels: { style: { colors: textColor } }
-        },
+        xaxis: { categories: teamDailyDates, labels: { style: { colors: textColor } } },
+        yaxis: { labels: { style: { colors: textColor } } },
+        legend: { position: 'top', labels: { colors: textColor } },
         tooltip: { theme: tooltipTheme },
         dataLabels: { enabled: false },
         series: [
-            { name: 'Total Team Invoices', data: teamDailyInvoices }
+            { name: 'Invoices Created', data: teamSeriesInvoices },
+            { name: 'Returns Handled', data: teamSeriesReturns }
         ]
     };
     renderOrUpdateChart('user-chart-team-productivity-trend', 'teamDailyTrend', teamTrendOptions);
 
-    // Redraw Lucide Icons in KPI cards
+    // Chart 4: Team Hourly Productivity Distribution & Peak Badge
+    let maxTeamHourVal = 0;
+    let peakTeamHourIndex = 17; // default 5 PM
+    if (typeof teamHourlyDistribution !== 'undefined') {
+        teamHourlyDistribution.forEach((val, h) => {
+            if (val > maxTeamHourVal) {
+                maxTeamHourVal = val;
+                peakTeamHourIndex = h;
+            }
+        });
+    }
+    const peakStart = (peakTeamHourIndex % 12 || 12) + (peakTeamHourIndex >= 12 ? ' PM' : ' AM');
+    const peakEndH = (peakTeamHourIndex + 1) % 24;
+    const peakEnd = (peakEndH % 12 || 12) + (peakEndH >= 12 ? ' PM' : ' AM');
+    const peakHourBadge = document.getElementById('user-team-peak-hour-badge');
+    if (peakHourBadge) {
+        peakHourBadge.textContent = maxTeamHourVal > 0 
+            ? `Peak: ${peakStart} - ${peakEnd} (${maxTeamHourVal.toLocaleString()} Tx)` 
+            : 'Peak: 10 AM - 6 PM';
+    }
+
+    const teamHourCategories = [];
+    const teamHourSeriesData = [];
+    for (let h = 8; h <= 20; h++) {
+        const label = (h % 12 || 12) + (h >= 12 ? ' PM' : ' AM');
+        teamHourCategories.push(label);
+        teamHourSeriesData.push((typeof teamHourlyDistribution !== 'undefined' && teamHourlyDistribution[h]) || 0);
+    }
+
+    const teamHourlyOptions = {
+        chart: {
+            type: 'bar',
+            height: 280,
+            width: '100%',
+            toolbar: { show: false },
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        colors: ['#6366f1'],
+        plotOptions: {
+            bar: {
+                borderRadius: 4,
+                columnWidth: '55%',
+                distributed: false
+            }
+        },
+        grid: { borderColor: gridColor },
+        xaxis: {
+            categories: teamHourCategories,
+            labels: { style: { colors: textColor, fontSize: '10px' } }
+        },
+        yaxis: {
+            labels: {
+                style: { colors: textColor },
+                formatter: (v) => Math.round(v).toLocaleString()
+            }
+        },
+        tooltip: {
+            theme: tooltipTheme,
+            y: { formatter: (val) => `${val.toLocaleString()} transactions` }
+        },
+        dataLabels: { enabled: false },
+        series: [
+            { name: 'Team Output', data: teamHourSeriesData }
+        ]
+    };
+    renderOrUpdateChart('user-chart-hourly-heatmap', 'teamHourlyHeatmap', teamHourlyOptions);
+
     if (window.lucide) {
         lucide.createIcons();
     }
 
-    // Close button for user details panel
     const closeBtn = document.getElementById('btn-close-user-details');
     if (closeBtn) {
         closeBtn.onclick = () => {
@@ -4838,21 +5620,17 @@ function showOperatorDailyLog(userData) {
     if (!panel) return;
     panel.classList.remove('hidden');
 
-    // Set operator name
     document.getElementById('user-details-selected-name').textContent = userData.name;
 
-    // Reset date filter input
     const dateFilterInput = document.getElementById('user-details-date-filter');
     const clearFilterBtn = document.getElementById('btn-clear-date-filter');
     if (dateFilterInput) dateFilterInput.value = '';
     if (clearFilterBtn) clearFilterBtn.style.display = 'none';
 
-    // Build sorted daily entries
     const dailyEntries = Object.entries(userData.dailyLog)
         .map(([dateKey, data]) => ({
             dateKey,
             ...data,
-            // Parse for sorting: DD-MM-YYYY -> Date
             sortDate: (() => {
                 const [d, m, y] = dateKey.split('-');
                 return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
@@ -4860,12 +5638,11 @@ function showOperatorDailyLog(userData) {
         }))
         .sort((a, b) => a.sortDate - b.sortDate);
 
-    // Compute KPIs
     const totalDays = dailyEntries.length || 1;
-    const totalInvoices = dailyEntries.reduce((s, e) => s + e.invoices, 0);
-    const dailyAvg = (totalInvoices / totalDays).toFixed(1);
-    const maxDay = dailyEntries.reduce((m, e) => Math.max(m, e.invoices), 0);
-    const avgVal = userData.salesCount > 0 ? '₹' + Math.round(userData.salesAmount / userData.salesCount).toLocaleString() : '₹0';
+    const totalTx = dailyEntries.reduce((s, e) => s + (e.invoices || 0) + (e.returns || 0), 0);
+    const dailyAvg = (totalTx / totalDays).toFixed(1);
+    const maxDay = dailyEntries.reduce((m, e) => Math.max(m, (e.invoices || 0) + (e.returns || 0)), 0);
+    const avgVal = userData.totalTx > 0 ? '₹' + Math.round(userData.totalValue / userData.totalTx).toLocaleString() : '₹0';
     const accuracy = userData.accuracyRate !== undefined ? userData.accuracyRate.toFixed(1) + '%' : '100%';
 
     document.getElementById('user-detail-kpi-daily-avg').textContent = dailyAvg;
@@ -4873,7 +5650,75 @@ function showOperatorDailyLog(userData) {
     document.getElementById('user-detail-kpi-avg-val').textContent = avgVal;
     document.getElementById('user-detail-kpi-accuracy').textContent = accuracy;
 
-    // Set platform breakdown details (Transactions count, Sales total, Purchases total, Returns total & count)
+    const speedKpi = document.getElementById('user-detail-kpi-speed');
+    if (speedKpi) speedKpi.textContent = `${userData.speedPerHour || 0} Tx/Hr`;
+
+    const gpKpi = document.getElementById('user-detail-kpi-gross-profit');
+    if (gpKpi) {
+        gpKpi.textContent = userData.salesAmount > 0 
+            ? `₹${Math.round(userData.grossProfit).toLocaleString()} (${userData.profitMargin}%)` 
+            : '—';
+    }
+
+    // GitHub-Style Activity Contribution Heatmap Grid
+    const heatmapGrid = document.getElementById('user-activity-heatmap-grid');
+    const heatmapSummary = document.getElementById('user-activity-heatmap-summary');
+    if (heatmapGrid) {
+        heatmapGrid.innerHTML = '';
+        let topEntry = null;
+        let topTx = 0;
+
+        dailyEntries.forEach(entry => {
+            const tx = (entry.invoices || 0) + (entry.returns || 0);
+            const val = (entry.amount || 0) + (entry.returnAmt || 0);
+            if (tx > topTx) {
+                topTx = tx;
+                topEntry = entry;
+            }
+            const ratio = maxDay > 0 ? (tx / maxDay) : 0;
+            let tileBg = 'rgba(255, 255, 255, 0.04)';
+            let border = '1px solid rgba(255, 255, 255, 0.08)';
+            let textCol = 'var(--text-muted)';
+            if (ratio > 0.75) {
+                tileBg = '#4f46e5';
+                border = '1px solid #6366f1';
+                textCol = '#ffffff';
+            } else if (ratio > 0.45) {
+                tileBg = '#6366f1';
+                border = '1px solid #818cf8';
+                textCol = '#ffffff';
+            } else if (ratio > 0.2) {
+                tileBg = '#818cf8';
+                border = '1px solid #a5b4fc';
+                textCol = '#1e1b4b';
+            } else if (tx > 0) {
+                tileBg = '#c7d2fe';
+                border = '1px solid #e0e7ff';
+                textCol = '#1e1b4b';
+            }
+
+            const tile = document.createElement('div');
+            tile.style.cssText = `width: 24px; height: 24px; border-radius: 4px; background: ${tileBg}; border: ${border}; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: ${textCol}; user-select: none;`;
+            const dayNum = entry.dateKey.split('-')[0];
+            tile.textContent = dayNum;
+            tile.title = `${entry.dateKey}: ${tx} Transactions (₹${Math.round(val).toLocaleString()})`;
+            tile.onmouseenter = () => { tile.style.transform = 'scale(1.2)'; tile.style.zIndex = '10'; };
+            tile.onmouseleave = () => { tile.style.transform = 'scale(1)'; tile.style.zIndex = '1'; };
+            tile.onclick = () => {
+                if (dateFilterInput) {
+                    const [d, m, y] = entry.dateKey.split('-');
+                    dateFilterInput.value = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+                    dateFilterInput.dispatchEvent(new Event('change'));
+                }
+            };
+            heatmapGrid.appendChild(tile);
+        });
+
+        if (heatmapSummary) {
+            heatmapSummary.textContent = `${dailyEntries.length} Active Days • Max: ${topEntry ? `${topEntry.dateKey} (${topTx} Tx)` : 'None'}`;
+        }
+    }
+
     const setPlatformBreakdown = (key) => {
         const count = userData.platforms[key] || 0;
         const sale = userData.platformSales[key] || 0;
@@ -4891,13 +5736,11 @@ function showOperatorDailyLog(userData) {
     
     ['amz', 'ajio', 'myn', 'fk'].forEach(setPlatformBreakdown);
 
-    // Render function for daily log table & trend chart
     const renderDailyLogData = (entriesToRender) => {
-        // Populate daily log table
         const tbody = document.getElementById('user-details-daily-tbody');
         tbody.innerHTML = '';
         if (entriesToRender.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--text-muted);">No daily data matching filter.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="padding: 16px; text-align: center; color: var(--text-muted);">No daily data matching filter.</td></tr>';
         } else {
             entriesToRender.forEach(entry => {
                 const tr = document.createElement('tr');
@@ -4906,20 +5749,22 @@ function showOperatorDailyLog(userData) {
                 tr.className = 'daily-log-row';
                 tr.style.transition = 'background-color 0.15s';
                 
-                // Highlight high-output days
-                const isHighDay = entry.invoices >= maxDay * 0.8 && maxDay > 0;
+                const entryTotalTx = (entry.invoices || 0) + (entry.returns || 0);
+                const entryTotalVal = (entry.amount || 0) + (entry.returnAmt || 0);
+                const isHighDay = entryTotalTx >= maxDay * 0.8 && maxDay > 0;
+                
                 tr.innerHTML = `
                     <td style="padding: 10px; font-size: 13px; color: var(--text-color); display: flex; align-items: center; gap: 6px; user-select: none;">
                         <i data-lucide="chevron-right" class="row-arrow" style="width: 14px; height: 14px; transition: transform 0.2s; color: var(--text-muted);"></i>
                         ${entry.dateKey}
                     </td>
-                    <td style="padding: 10px; text-align: center; font-weight: 700; color: ${isHighDay ? '#10b981' : 'var(--text-title)'};">${entry.invoices.toLocaleString()}${isHighDay ? ' 🔥' : ''}</td>
-                    <td style="padding: 10px; text-align: right; font-size: 13px; color: var(--text-color);">₹${entry.amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
-                    <td style="padding: 10px; text-align: center; font-size: 13px; color: ${entry.disputes > 0 ? '#ef4444' : 'var(--text-muted)'};">${entry.disputes}</td>
+                    <td style="padding: 10px; text-align: center; font-weight: 700; color: var(--text-title);">${(entry.invoices || 0).toLocaleString()}</td>
+                    <td style="padding: 10px; text-align: center; font-weight: 700; color: #f43f5e;">${(entry.returns || 0).toLocaleString()}</td>
+                    <td style="padding: 10px; text-align: right; font-size: 13px; font-weight: 700; color: #10b981;">₹${entryTotalVal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}${isHighDay ? ' 🔥' : ''}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 13px; color: ${entry.disputes > 0 ? '#ef4444' : 'var(--text-muted)'};">${entry.disputes || 0}</td>
                 `;
                 tbody.appendChild(tr);
 
-                // Expandable sub-row details containing platform specific breakdown
                 const detailTr = document.createElement('tr');
                 detailTr.className = 'daily-detail-row hidden';
                 detailTr.style.background = 'rgba(0, 0, 0, 0.12)';
@@ -4947,7 +5792,7 @@ function showOperatorDailyLog(userData) {
                 }
 
                 detailTr.innerHTML = `
-                    <td colspan="4" style="padding: 10px 14px;">
+                    <td colspan="5" style="padding: 10px 14px;">
                         <div style="display: flex; flex-wrap: wrap; gap: 10px;">
                             ${detailCardsHtml || '<div style="font-size: 11px; color: var(--text-muted);">No platform details recorded for this date.</div>'}
                         </div>
@@ -4955,11 +5800,8 @@ function showOperatorDailyLog(userData) {
                 `;
                 tbody.appendChild(detailTr);
 
-                // Row toggle click handler
                 tr.onclick = () => {
                     const wasHidden = detailTr.classList.contains('hidden');
-                    
-                    // Close other details to keep layout clean
                     tbody.querySelectorAll('.daily-detail-row').forEach(r => r.classList.add('hidden'));
                     tbody.querySelectorAll('.daily-log-row i.row-arrow').forEach(a => a.style.transform = 'rotate(0deg)');
                     tbody.querySelectorAll('.daily-log-row').forEach(r => r.style.backgroundColor = '');
@@ -4972,7 +5814,6 @@ function showOperatorDailyLog(userData) {
                     }
                 };
             });
-            // Re-render arrow icons
             if (window.lucide) lucide.createIcons();
         }
 
@@ -4983,8 +5824,8 @@ function showOperatorDailyLog(userData) {
         const tooltipTheme = isDark ? 'dark' : 'light';
 
         const categories = entriesToRender.map(e => e.dateKey);
-        const invoiceSeries = entriesToRender.map(e => e.invoices);
-        const amountSeries = entriesToRender.map(e => Math.round(e.amount));
+        const txSeries = entriesToRender.map(e => (e.invoices || 0) + (e.returns || 0));
+        const amountSeries = entriesToRender.map(e => Math.round((e.amount || 0) + (e.returnAmt || 0)));
 
         const trendOptions = {
             chart: {
@@ -4996,9 +5837,7 @@ function showOperatorDailyLog(userData) {
                 toolbar: { show: false },
                 zoom: { enabled: false }
             },
-            dataLabels: {
-                enabled: false // Disable data label boxes on the chart lines to avoid clutter
-            },
+            dataLabels: { enabled: false },
             colors: ['#6366f1', '#10b981'],
             stroke: { width: [3, 2], curve: 'smooth' },
             markers: {
@@ -5024,14 +5863,14 @@ function showOperatorDailyLog(userData) {
                 {
                     min: 0,
                     forceNiceScale: true,
-                    title: { text: 'Invoices', style: { color: textColor, fontSize: '11px' } },
+                    title: { text: 'Transactions', style: { color: textColor, fontSize: '11px' } },
                     labels: { style: { colors: textColor }, formatter: (v) => Math.round(v).toLocaleString() }
                 },
                 {
                     min: 0,
                     opposite: true,
                     forceNiceScale: true,
-                    title: { text: 'Amount (₹)', style: { color: textColor, fontSize: '11px' } },
+                    title: { text: 'Total Value (₹)', style: { color: textColor, fontSize: '11px' } },
                     labels: { style: { colors: textColor }, formatter: (v) => '₹' + formatNumberCompact(v) }
                 }
             ],
@@ -5041,26 +5880,110 @@ function showOperatorDailyLog(userData) {
                 y: {
                     formatter: function(val, opts) {
                         if (opts.seriesIndex === 1) return '₹' + val.toLocaleString();
-                        return val + ' invoices';
+                        return val + ' tx';
                     }
                 }
             },
             series: [
-                { name: 'Invoices', type: 'area', data: invoiceSeries },
-                { name: 'Amount', type: 'line', data: amountSeries }
+                { name: 'Transactions', type: 'area', data: txSeries },
+                { name: 'Total Value (₹)', type: 'line', data: amountSeries }
             ]
         };
 
         renderOrUpdateChart('user-chart-daily-trend', 'userDailyTrend', trendOptions);
     };
 
-    // Render initial data
     renderDailyLogData(dailyEntries);
 
-    // Wire date picker change event
+    // Operator Hourly Working Pattern Chart & Peak Badge
+    const opPeakBadge = document.getElementById('user-detail-peak-hour-badge');
+    if (opPeakBadge) {
+        opPeakBadge.textContent = userData.peakHourStr ? `Peak: ${userData.peakHourStr}` : 'Peak: 10 AM - 6 PM';
+    }
+
+    const isDarkDetail = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textDetailColor = isDarkDetail ? '#94a3b8' : '#64748b';
+    const gridDetailColor = isDarkDetail ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+    const tooltipDetailTheme = isDarkDetail ? 'dark' : 'light';
+
+    const opHourCategories = [];
+    const opHourSeriesData = [];
+    for (let h = 8; h <= 20; h++) {
+        const label = (h % 12 || 12) + (h >= 12 ? ' PM' : ' AM');
+        opHourCategories.push(label);
+        opHourSeriesData.push((userData.hourlyDistribution && userData.hourlyDistribution[h]) || 0);
+    }
+
+    const opHourlyOptions = {
+        chart: {
+            type: 'bar',
+            height: 240,
+            width: '100%',
+            toolbar: { show: false },
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        colors: [userData.specialtyColor || '#6366f1'],
+        plotOptions: {
+            bar: {
+                borderRadius: 4,
+                columnWidth: '55%',
+                distributed: false
+            }
+        },
+        grid: { borderColor: gridDetailColor },
+        xaxis: {
+            categories: opHourCategories,
+            labels: { style: { colors: textDetailColor, fontSize: '10px' } }
+        },
+        yaxis: {
+            labels: {
+                style: { colors: textDetailColor },
+                formatter: (v) => Math.round(v).toLocaleString()
+            }
+        },
+        tooltip: {
+            theme: tooltipDetailTheme,
+            y: { formatter: (val) => `${val.toLocaleString()} operations` }
+        },
+        dataLabels: { enabled: false },
+        series: [
+            { name: `${userData.name} Output`, data: opHourSeriesData }
+        ]
+    };
+    renderOrUpdateChart('user-detail-hourly-chart', 'opHourlyChart', opHourlyOptions);
+
+    // Operator Marketplace Share Donut Chart
+    const opPlatAmz = userData.platforms.amz || 0;
+    const opPlatAjio = userData.platforms.ajio || 0;
+    const opPlatMyn = userData.platforms.myn || 0;
+    const opPlatFk = userData.platforms.fk || 0;
+    const opPlatTotal = opPlatAmz + opPlatAjio + opPlatMyn + opPlatFk;
+
+    const opDonutOptions = {
+        chart: {
+            type: 'donut',
+            height: 240,
+            width: '100%',
+            background: 'transparent',
+            fontFamily: 'Inter, sans-serif'
+        },
+        labels: ['Amazon', 'Ajio', 'Myntra', 'Flipkart'],
+        series: opPlatTotal > 0 ? [opPlatAmz, opPlatAjio, opPlatMyn, opPlatFk] : [1, 1, 1, 1],
+        colors: ['#ff9900', '#10b981', '#f43f5e', '#0083ca'],
+        legend: { position: 'bottom', labels: { colors: textDetailColor } },
+        tooltip: {
+            theme: tooltipDetailTheme,
+            y: { formatter: (val) => `${val.toLocaleString()} transactions` }
+        },
+        dataLabels: { enabled: true, formatter: (val) => opPlatTotal > 0 ? val.toFixed(1) + "%" : "0%" },
+        plotOptions: { pie: { donut: { size: '60%' } } }
+    };
+    renderOrUpdateChart('user-detail-platform-donut', 'opPlatformDonut', opDonutOptions);
+
     if (dateFilterInput) {
         dateFilterInput.onchange = (e) => {
-            const val = e.target.value; // YYYY-MM-DD
+            const val = e.target.value;
             if (val) {
                 const [y, m, d] = val.split('-');
                 const targetKey = `${d}-${m}-${y}`;
@@ -5072,12 +5995,8 @@ function showOperatorDailyLog(userData) {
                 if (clearFilterBtn) clearFilterBtn.style.display = 'none';
             }
         };
-
-        // Browser handles native date input click to open calendar.
-        // The wrapper div onclick in HTML also calls showPicker() if supported.
     }
 
-    // Wire clear filter button
     if (clearFilterBtn) {
         clearFilterBtn.onclick = () => {
             if (dateFilterInput) dateFilterInput.value = '';
@@ -5086,13 +6005,69 @@ function showOperatorDailyLog(userData) {
         };
     }
 
-    // Scroll to details panel
+    // 1-Click WhatsApp Scorecard Share
+    const waBtn = document.getElementById('btn-whatsapp-scorecard');
+    if (waBtn) {
+        waBtn.onclick = () => {
+            const selectedMonth = document.getElementById('user-month-filter')?.value || 'ALL';
+            const periodLabel = selectedMonth === 'ALL' ? 'All Months' : selectedMonth;
+            const accuracyStr = userData.accuracyRate !== undefined ? userData.accuracyRate.toFixed(1) + '%' : '100%';
+            const msg = [
+                `🏆 *Operator Performance Scorecard*`,
+                `👤 *Name:* ${userData.name}`,
+                `📅 *Period:* ${periodLabel}`,
+                `🏅 *Rank:* #${userData.rank} | ${userData.badge}`,
+                `🎯 *Specialty:* ${userData.specialty}`,
+                `⚡ *Velocity:* ${userData.speedPerHour || 0} Tx/Hr (Peak: ${userData.peakHourStr || '10 AM - 6 PM'})`,
+                ``,
+                `📊 *Core Performance:*`,
+                `• Total Transactions: ${userData.totalTx.toLocaleString()}`,
+                `• Invoices Created: ${userData.salesCount.toLocaleString()} (₹${Math.round(userData.salesAmount).toLocaleString()})`,
+                `• Gross Profit: ₹${Math.round(userData.grossProfit).toLocaleString()} (${userData.profitMargin}%)`,
+                `• Returns Handled: ${userData.returnCount.toLocaleString()} (₹${Math.round(userData.returnAmount).toLocaleString()})`,
+                `• Accuracy Rate: ${accuracyStr} (Disputes: ${userData.disputes})`,
+                ``,
+                `🏢 *Marketplace Activity:*`,
+                `• Myntra: ${userData.platforms.myn} | Ajio: ${userData.platforms.ajio}`,
+                `• Amazon: ${userData.platforms.amz} | Flipkart: ${userData.platforms.fk}`,
+                ``,
+                `_Generated by Invoice Data Center_`
+            ].join('\n');
+
+            navigator.clipboard.writeText(msg).catch(() => {});
+            const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+            window.open(waUrl, '_blank');
+        };
+    }
+
+    // Export Daily Activity CSV
+    const exportCsvBtn = document.getElementById('btn-export-operator-csv');
+    if (exportCsvBtn) {
+        exportCsvBtn.onclick = () => {
+            let csv = 'Date,Invoices,Returns,Total Transactions,Sale Value (INR),Disputes,Amazon Tx,Ajio Tx,Myntra Tx,Flipkart Tx\n';
+            dailyEntries.forEach(e => {
+                const tx = (e.invoices || 0) + (e.returns || 0);
+                const val = (e.amount || 0) + (e.returnAmt || 0);
+                const amz = (e.platforms?.amz?.invoices || 0) + (e.platforms?.amz?.returns || 0);
+                const ajio = (e.platforms?.ajio?.invoices || 0) + (e.platforms?.ajio?.returns || 0);
+                const myn = (e.platforms?.myn?.invoices || 0) + (e.platforms?.myn?.returns || 0);
+                const fk = (e.platforms?.fk?.invoices || 0) + (e.platforms?.fk?.returns || 0);
+                csv += `"${e.dateKey}",${e.invoices || 0},${e.returns || 0},${tx},${Math.round(val)},${e.disputes || 0},${amz},${ajio},${myn},${fk}\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', `${userData.name}_daily_log.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+    }
+
     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-    // Redraw Lucide icons
     if (window.lucide) lucide.createIcons();
 
-    // Wire Export Scorecard button
     const exportBtn = document.getElementById('btn-export-scorecard');
     if (exportBtn) {
         exportBtn.onclick = () => exportOperatorScorecard(userData, dailyEntries);
@@ -5108,37 +6083,38 @@ function exportOperatorScorecard(userData, dailyEntries) {
     const now = new Date();
     const generatedDate = now.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    // Compute stats
     const totalDays = dailyEntries.length || 1;
-    const totalInvoices = dailyEntries.reduce((s, e) => s + e.invoices, 0);
-    const totalAmount = dailyEntries.reduce((s, e) => s + e.amount, 0);
-    const totalDisputes = dailyEntries.reduce((s, e) => s + e.disputes, 0);
-    const dailyAvg = (totalInvoices / totalDays).toFixed(1);
-    const maxDay = dailyEntries.reduce((m, e) => Math.max(m, e.invoices), 0);
-    const avgValue = userData.salesCount > 0 ? Math.round(userData.salesAmount / userData.salesCount) : 0;
+    const totalInvoices = dailyEntries.reduce((s, e) => s + (e.invoices || 0), 0);
+    const totalReturns = dailyEntries.reduce((s, e) => s + (e.returns || 0), 0);
+    const totalAmount = dailyEntries.reduce((s, e) => s + (e.amount || 0), 0);
+    const totalReturnAmt = dailyEntries.reduce((s, e) => s + (e.returnAmt || 0), 0);
+    const totalDisputes = dailyEntries.reduce((s, e) => s + (e.disputes || 0), 0);
+    const dailyAvg = ((totalInvoices + totalReturns) / totalDays).toFixed(1);
+    const maxDay = dailyEntries.reduce((m, e) => Math.max(m, (e.invoices || 0) + (e.returns || 0)), 0);
+    const avgValue = userData.totalTx > 0 ? Math.round(userData.totalValue / userData.totalTx) : 0;
     const accuracy = userData.accuracyRate !== undefined ? userData.accuracyRate.toFixed(1) : '100.0';
     const totalPurchases = Object.values(userData.platformPurchases).reduce((sum, val) => sum + val, 0);
 
-    // Platform breakdown
     const platformLabels = { amz: 'Amazon', ajio: 'Ajio', myn: 'Myntra', fk: 'Flipkart' };
     const platformColors = { amz: '#ff9900', ajio: '#10b981', myn: '#f43f5e', fk: '#0083ca' };
     const totalPlatformTx = userData.platforms.amz + userData.platforms.ajio + userData.platforms.myn + userData.platforms.fk;
 
-    // Build daily rows HTML
     let dailyRowsHtml = '';
     dailyEntries.forEach((entry, idx) => {
         const bgColor = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
+        const entryTx = (entry.invoices || 0) + (entry.returns || 0);
+        const entryVal = (entry.amount || 0) + (entry.returnAmt || 0);
         dailyRowsHtml += `
             <tr style="background: ${bgColor};">
                 <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px;">${entry.dateKey}</td>
-                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #1e293b;">${entry.invoices}</td>
-                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-size: 13px;">₹${entry.amount.toLocaleString()}</td>
-                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: center; color: ${entry.disputes > 0 ? '#ef4444' : '#94a3b8'};">${entry.disputes}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #1e293b;">${entry.invoices || 0}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #f43f5e;">${entry.returns || 0}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-size: 13px; font-weight: 700; color: #10b981;">₹${entryVal.toLocaleString()}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: center; color: ${entry.disputes > 0 ? '#ef4444' : '#94a3b8'};">${entry.disputes || 0}</td>
             </tr>
         `;
     });
 
-    // Build platform breakdown
     let platformHtml = '';
     for (const pk of ['amz', 'ajio', 'myn', 'fk']) {
         const count = userData.platforms[pk];
@@ -5212,7 +6188,7 @@ function exportOperatorScorecard(userData, dailyEntries) {
             <!-- KPI Grid -->
             <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px;">
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
-                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Total Invoices</p>
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Invoices</p>
                     <p style="font-size: 20px; font-weight: 800; color: #1e293b; margin-top: 4px;">${userData.salesCount.toLocaleString()}</p>
                 </div>
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
@@ -5220,12 +6196,12 @@ function exportOperatorScorecard(userData, dailyEntries) {
                     <p style="font-size: 20px; font-weight: 800; color: #10b981; margin-top: 4px;">₹${userData.salesAmount.toLocaleString()}</p>
                 </div>
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
-                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Purchase Amount</p>
-                    <p style="font-size: 20px; font-weight: 800; color: #3b82f6; margin-top: 4px;">₹${totalPurchases.toLocaleString()}</p>
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Returns (CN/DN)</p>
+                    <p style="font-size: 20px; font-weight: 800; color: #f43f5e; margin-top: 4px;">${userData.returnCount.toLocaleString()}</p>
                 </div>
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
-                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Avg/Invoice</p>
-                    <p style="font-size: 20px; font-weight: 800; color: #06b6d4; margin-top: 4px;">₹${avgValue.toLocaleString()}</p>
+                    <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Return Value</p>
+                    <p style="font-size: 20px; font-weight: 800; color: #f43f5e; margin-top: 4px;">₹${userData.returnAmount.toLocaleString()}</p>
                 </div>
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 8px; text-align: center;">
                     <p style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Daily Avg</p>
@@ -5239,7 +6215,8 @@ function exportOperatorScorecard(userData, dailyEntries) {
                     <h3 style="font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">📊 Performance Summary</h3>
                     <table style="width: 100%; font-size: 13px;">
                         <tr><td style="padding: 4px 0; color: #64748b;">Active Days</td><td style="text-align: right; font-weight: 600;">${totalDays}</td></tr>
-                        <tr><td style="padding: 4px 0; color: #64748b;">Max Daily Output</td><td style="text-align: right; font-weight: 600;">${maxDay} invoices</td></tr>
+                        <tr><td style="padding: 4px 0; color: #64748b;">Max Daily Output</td><td style="text-align: right; font-weight: 600;">${maxDay} transactions</td></tr>
+                        <tr><td style="padding: 4px 0; color: #64748b;">Invoices Created</td><td style="text-align: right; font-weight: 600;">${userData.salesCount}</td></tr>
                         <tr><td style="padding: 4px 0; color: #64748b;">Returns Processed</td><td style="text-align: right; font-weight: 600;">${userData.returnCount}</td></tr>
                         <tr><td style="padding: 4px 0; color: #64748b;">Disputes</td><td style="text-align: right; font-weight: 600; color: ${userData.disputes > 0 ? '#ef4444' : '#10b981'};">${userData.disputes} (${userData.disputeRate}%)</td></tr>
                     </table>
@@ -5258,18 +6235,20 @@ function exportOperatorScorecard(userData, dailyEntries) {
                         <tr style="background: #f1f5f9;">
                             <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Date</th>
                             <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Invoices</th>
-                            <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Amount</th>
+                            <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Returns (CN/DN)</th>
+                            <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Total Value</th>
                             <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0;">Disputes</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${dailyRowsHtml || '<tr><td colspan="4" style="padding: 16px; text-align: center; color: #94a3b8;">No daily data available</td></tr>'}
+                        ${dailyRowsHtml || '<tr><td colspan="5" style="padding: 16px; text-align: center; color: #94a3b8;">No daily data available</td></tr>'}
                     </tbody>
                     <tfoot>
                         <tr style="background: #f1f5f9; font-weight: 700;">
                             <td style="padding: 10px 12px; border-top: 2px solid #e2e8f0;">TOTAL</td>
                             <td style="padding: 10px 12px; text-align: center; border-top: 2px solid #e2e8f0;">${totalInvoices}</td>
-                            <td style="padding: 10px 12px; text-align: right; border-top: 2px solid #e2e8f0;">₹${totalAmount.toLocaleString()}</td>
+                            <td style="padding: 10px 12px; text-align: center; border-top: 2px solid #e2e8f0;">${totalReturns}</td>
+                            <td style="padding: 10px 12px; text-align: right; border-top: 2px solid #e2e8f0;">₹${(totalAmount + totalReturnAmt).toLocaleString()}</td>
                             <td style="padding: 10px 12px; text-align: center; border-top: 2px solid #e2e8f0; color: ${totalDisputes > 0 ? '#ef4444' : '#10b981'};">${totalDisputes}</td>
                         </tr>
                     </tfoot>

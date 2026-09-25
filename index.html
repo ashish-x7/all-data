@@ -615,13 +615,24 @@
                         <h2 style="font-size: 20px; font-weight: 700; color: var(--text-title); margin: 0;">User Performance & Leaderboard</h2>
                     </div>
                     
-                    <div class="global-dashboard-filters" style="display: flex; gap: 12px; align-items: center;">
-                        <select id="user-month-filter" class="form-select-settings" style="padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background-color: var(--bg-card); color: var(--text-color); cursor: pointer;"></select>
+                    <div class="global-dashboard-filters" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Data Source:</span>
+                            <select id="user-source-filter" class="form-select-settings" style="padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background-color: var(--bg-card); color: var(--text-color); cursor: pointer; font-weight: 600;">
+                                <option value="live" selected>⚡ Live Sheets (Invoice + Return)</option>
+                                <option value="combined">🔄 Combined (Live + Monthly)</option>
+                                <option value="monthly">📅 Monthly Sheet (Consolidated)</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Month:</span>
+                            <select id="user-month-filter" class="form-select-settings" style="padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background-color: var(--bg-card); color: var(--text-color); cursor: pointer; font-weight: 600;"></select>
+                        </div>
                     </div>
                 </div>
 
                 <!-- KPI Cards Row -->
-                <div class="metrics-grid" style="margin-bottom: 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
+                <div class="metrics-grid" style="margin-bottom: 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
                     <!-- Active Operators -->
                     <div class="metric-card" style="border-left: 4px solid #10b981;">
                         <div class="metric-icon emerald">
@@ -652,6 +663,16 @@
                             <h3 class="metric-value" id="user-kpi-total-volume" style="font-size: 24px; font-weight: 700; color: var(--text-title); margin: 0;">0</h3>
                         </div>
                     </div>
+                    <!-- Gross Profit -->
+                    <div class="metric-card" style="border-left: 4px solid #10b981;">
+                        <div class="metric-icon emerald">
+                            <i data-lucide="trending-up"></i>
+                        </div>
+                        <div class="metric-details">
+                            <span class="metric-title" style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">Gross Profit (Margin)</span>
+                            <h3 class="metric-value" id="user-kpi-gross-profit" style="font-size: 22px; font-weight: 700; color: #10b981; margin: 0;">₹0 (0%)</h3>
+                        </div>
+                    </div>
                     <!-- Average Accuracy -->
                     <div class="metric-card" style="border-left: 4px solid #f59e0b;">
                         <div class="metric-icon amber">
@@ -664,6 +685,48 @@
                     </div>
                 </div>
 
+                <!-- Smart Quality Audit & Anomaly Alerts Bar -->
+                <div id="user-audit-container" class="global-chart-wrapper" style="padding: 16px 20px; background: rgba(245, 158, 11, 0.03); border-radius: var(--radius-md); border: 1px solid rgba(245, 158, 11, 0.2); margin-bottom: 24px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
+                                <i data-lucide="shield-alert" style="width: 18px; height: 18px;"></i>
+                            </span>
+                            <div>
+                                <h4 style="font-size: 14px; font-weight: 700; color: var(--text-title); margin: 0;">Smart Audit & Quality Alerts</h4>
+                                <p style="font-size: 12px; color: var(--text-muted); margin: 2px 0 0 0;">Automated error and anomaly scanner across invoices & returns</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <span id="audit-pill-high-inv" style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.25); color: #818cf8;">💎 0 High Invoices</span>
+                            <span id="audit-pill-zero-purch" style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #f87171;">⚠️ 0 Missing Cost</span>
+                            <span id="audit-pill-high-ret" style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.25); color: #fb7185;">📦 0 High Returns</span>
+                            <span id="audit-pill-disputes" style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25); color: #fbbf24;">🚩 0 Disputed</span>
+                            <button id="btn-toggle-audit-log" style="padding: 5px 12px; font-size: 11px; font-weight: 700; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: rgba(255,255,255,0.06); color: var(--text-title); cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                <i data-lucide="chevron-down" id="audit-toggle-arrow" style="width: 14px; height: 14px; transition: transform 0.2s;"></i> View Log
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Collapsible Audit Log Table -->
+                    <div id="user-audit-log-drawer" class="hidden" style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(245, 158, 11, 0.15); max-height: 250px; overflow-y: auto;">
+                        <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                            <thead>
+                                <tr>
+                                    <th style="padding: 8px; text-align: left; color: var(--text-muted);">Date</th>
+                                    <th style="padding: 8px; text-align: left; color: var(--text-muted);">Operator</th>
+                                    <th style="padding: 8px; text-align: left; color: var(--text-muted);">Platform</th>
+                                    <th style="padding: 8px; text-align: left; color: var(--text-muted);">Ref / Invoice ID</th>
+                                    <th style="padding: 8px; text-align: right; color: var(--text-muted);">Amount (₹)</th>
+                                    <th style="padding: 8px; text-align: left; color: var(--text-muted);">Issue Detected</th>
+                                </tr>
+                            </thead>
+                            <tbody id="user-audit-log-tbody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- Full-Width Leaderboard Table -->
                 <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
                     <div class="global-chart-header" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
@@ -671,10 +734,14 @@
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span style="font-size: 12px; color: var(--text-muted);">Sort by:</span>
                             <select id="leaderboard-sort-select" style="padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-color); font-size: 12px; font-weight: 600; outline: none; cursor: pointer; color-scheme: dark;">
+                                <option value="totalVolume" selected>Total Volume (Invoices + Returns)</option>
+                                <option value="totalValue">Total Value (Sales + Returns ₹)</option>
                                 <option value="salesAmount">Sales Processed (Value)</option>
+                                <option value="grossProfit">Gross Profit (₹)</option>
                                 <option value="salesCount">Invoices Count</option>
+                                <option value="returnCount">Returns Handled (Count)</option>
+                                <option value="returnAmount">Return Value (₹)</option>
                                 <option value="accuracy">Accuracy Rate %</option>
-                                <option value="returnCount">Returns Handled</option>
                             </select>
                         </div>
                     </div>
@@ -685,7 +752,10 @@
                                     <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Rank</th>
                                     <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: left; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Operator</th>
                                     <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Sales Processed</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Gross Profit</th>
                                     <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invoices</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Returns (CN/DN)</th>
+                                    <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Return Value</th>
                                     <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Avg Value</th>
                                     <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Disputes</th>
                                     <th style="padding: 12px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Specialty</th>
@@ -704,7 +774,7 @@
                     <!-- Chart 1: Workload Share -->
                     <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
                         <div class="global-chart-header" style="margin-bottom: 16px;">
-                            <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Workload Share % (Total Invoices)</h3>
+                            <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Workload Share % (Total Transactions)</h3>
                         </div>
                         <div id="user-chart-volume-share" class="global-chart-container" style="height: 280px;"></div>
                     </div>
@@ -718,12 +788,24 @@
                     </div>
                 </div>
 
-                <!-- Team Productivity Trend Chart -->
-                <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
-                    <div class="global-chart-header" style="margin-bottom: 16px;">
-                        <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Team Daily Productivity Trend (Total Invoices Processed)</h3>
+                <!-- Two-Column Team Productivity & Hourly Peak Layout -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start;">
+                    <!-- Team Daily Productivity Trend Chart -->
+                    <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
+                        <div class="global-chart-header" style="margin-bottom: 16px;">
+                            <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Team Daily Productivity Trend (Invoices & Returns)</h3>
+                        </div>
+                        <div id="user-chart-team-productivity-trend" class="global-chart-container" style="height: 280px;"></div>
                     </div>
-                    <div id="user-chart-team-productivity-trend" class="global-chart-container" style="height: 300px;"></div>
+
+                    <!-- Team Hourly Peak Productivity Heatmap -->
+                    <div class="global-chart-wrapper" style="padding: 24px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
+                        <div class="global-chart-header" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0;">Hourly Productivity (Peak Working Hours)</h3>
+                            <span id="user-team-peak-hour-badge" style="padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.3);">🔥 Peak: —</span>
+                        </div>
+                        <div id="user-chart-hourly-heatmap" class="global-chart-container" style="height: 280px;"></div>
+                    </div>
                 </div>
 
                 <!-- Operator Comparison Section -->
@@ -731,7 +813,7 @@
                     <div class="global-chart-header" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <h3 style="font-size: 16px; font-weight: 600; color: var(--text-title); margin: 0; display: flex; align-items: center; gap: 8px;">
                             <i data-lucide="git-compare" style="color: #8b5cf6;"></i>
-                            Operator Side-by-Side Comparison
+                            Operator Side-by-Side Comparison & Skill Radar
                         </h3>
                     </div>
                     <div style="display: flex; gap: 16px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;">
@@ -759,6 +841,15 @@
                         <!-- Right operator card -->
                         <div id="compare-card-op2" style="padding: 16px; background: rgba(255,255,255,0.02); border-radius: var(--radius-sm); border: 1px solid var(--border-color);"></div>
                     </div>
+
+                    <!-- Overlapping 5-Axis Radar Chart -->
+                    <div id="compare-radar-container" class="hidden" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                        <div style="text-align: center; margin-bottom: 10px;">
+                            <h4 style="font-size: 14px; font-weight: 700; color: var(--text-title); margin: 0;">5-Axis Skill & Performance Radar Comparison</h4>
+                            <p style="font-size: 11px; color: var(--text-muted); margin: 2px 0 0 0;">Volume • Hourly Velocity • Financial Impact • Accuracy • Multi-Channel Versatility</p>
+                        </div>
+                        <div id="compare-radar-chart" class="global-chart-container" style="height: 320px;"></div>
+                    </div>
                 </div>
 
                 <!-- User Details & Daily Log (Initially hidden, revealed on click) -->
@@ -775,6 +866,12 @@
                                 <input type="date" id="user-details-date-filter" onclick="event.stopPropagation()" style="border: none; background: transparent; color: var(--text-color); font-size: 12px; outline: none; cursor: pointer; color-scheme: dark;">
                                 <button id="btn-clear-date-filter" onclick="event.stopPropagation(); document.getElementById('user-details-date-filter').value=''; document.getElementById('user-details-date-filter').dispatchEvent(new Event('change')); this.style.display='none';" style="border: none; background: transparent; color: #f43f5e; cursor: pointer; display: none; font-size: 11px; font-weight: 700; padding: 2px 4px;">Clear</button>
                             </div>
+                            <button id="btn-whatsapp-scorecard" style="padding: 6px 14px; font-size: 12px; display: flex; align-items: center; gap: 6px; border: 1px solid rgba(37, 211, 102, 0.35); background: rgba(37, 211, 102, 0.12); color: #25D366; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600; transition: all 0.2s;">
+                                <i data-lucide="message-circle" style="width: 14px; height: 14px;"></i> WhatsApp Share
+                            </button>
+                            <button id="btn-export-operator-csv" style="padding: 6px 14px; font-size: 12px; display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-color); background: rgba(255,255,255,0.05); color: var(--text-color); cursor: pointer; border-radius: var(--radius-sm); font-weight: 600; transition: all 0.2s;">
+                                <i data-lucide="file-spreadsheet" style="width: 14px; height: 14px;"></i> Export CSV
+                            </button>
                             <button id="btn-export-scorecard" style="padding: 6px 14px; font-size: 12px; display: flex; align-items: center; gap: 6px; border: 1px solid #6366f140; background: linear-gradient(135deg, #6366f120, #6366f108); color: #6366f1; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600; transition: all 0.2s;">
                                 <i data-lucide="download" style="width: 14px; height: 14px;"></i> Export Scorecard
                             </button>
@@ -785,23 +882,40 @@
                     </div>
 
                     <!-- Daily KPIs row for selected user -->
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
-                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Daily Avg Invoices</span>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 24px;">
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Daily Avg Output</span>
                             <h4 id="user-detail-kpi-daily-avg" style="font-size: 20px; font-weight: 700; color: var(--text-title); margin: 4px 0 0 0;">0</h4>
                         </div>
-                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; text-align: center;">
                             <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Max Daily Output</span>
                             <h4 id="user-detail-kpi-max-day" style="font-size: 20px; font-weight: 700; color: var(--text-title); margin: 4px 0 0 0;">0</h4>
                         </div>
-                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
-                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Avg Invoice Value</span>
-                            <h4 id="user-detail-kpi-avg-val" style="font-size: 20px; font-weight: 700; color: #10b981; margin: 4px 0 0 0;">₹0</h4>
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Hourly Speed</span>
+                            <h4 id="user-detail-kpi-speed" style="font-size: 20px; font-weight: 700; color: #8b5cf6; margin: 4px 0 0 0;">0 Tx/Hr</h4>
                         </div>
-                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 16px; text-align: center;">
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Gross Profit</span>
+                            <h4 id="user-detail-kpi-gross-profit" style="font-size: 18px; font-weight: 700; color: #10b981; margin: 4px 0 0 0;">₹0</h4>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; text-align: center;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Avg Ticket Value</span>
+                            <h4 id="user-detail-kpi-avg-val" style="font-size: 20px; font-weight: 700; color: #06b6d4; margin: 4px 0 0 0;">₹0</h4>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; text-align: center;">
                             <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Accuracy Rate</span>
                             <h4 id="user-detail-kpi-accuracy" style="font-size: 20px; font-weight: 700; color: #f59e0b; margin: 4px 0 0 0;">0%</h4>
                         </div>
+                    </div>
+
+                    <!-- GitHub-Style Activity Contribution Heatmap Grid -->
+                    <div style="margin-bottom: 24px; padding: 16px 20px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                            <h4 style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin: 0; letter-spacing: 0.5px;">Activity Heatmap Calendar (Daily Output Intensity)</h4>
+                            <span id="user-activity-heatmap-summary" style="font-size: 12px; color: #10b981; font-weight: 600;"></span>
+                        </div>
+                        <div id="user-activity-heatmap-grid" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;"></div>
                     </div>
 
                     <!-- Platform breakdown (Amazon, Ajio, Myntra, Flipkart) -->
@@ -900,7 +1014,7 @@
                         </div>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: start; flex-wrap: wrap;">
+                    <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: start; flex-wrap: wrap; margin-bottom: 24px;">
                         <!-- Daily Log Table -->
                         <div class="global-chart-wrapper" style="padding: 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                             <div style="overflow-y: auto; max-height: 320px;">
@@ -908,8 +1022,9 @@
                                     <thead>
                                         <tr>
                                             <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: left; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Date</th>
-                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invoices Created</th>
-                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Sales Amount</th>
+                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invoices</th>
+                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Returns (CN/DN)</th>
+                                            <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: right; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Total Value (₹)</th>
                                             <th style="padding: 10px; border-bottom: 2px solid var(--border-color); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Disputes</th>
                                         </tr>
                                     </thead>
@@ -923,9 +1038,27 @@
                         <!-- Daily Trend Line Chart -->
                         <div class="global-chart-wrapper" style="padding: 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                             <div class="global-chart-header" style="margin-bottom: 12px;">
-                                <h4 style="font-size: 14px; font-weight: 600; color: var(--text-title); margin: 0;">Daily Invoices Trend</h4>
+                                <h4 style="font-size: 14px; font-weight: 600; color: var(--text-title); margin: 0;">Daily Activity Trend</h4>
                             </div>
                             <div id="user-chart-daily-trend" class="global-chart-container" style="height: 250px;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Operator Hourly Peak & Marketplace Donut Row -->
+                    <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: start; flex-wrap: wrap;">
+                        <div class="global-chart-wrapper" style="padding: 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                            <div class="global-chart-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+                                <h4 style="font-size: 14px; font-weight: 600; color: var(--text-title); margin: 0;">Operator Hourly Working Pattern</h4>
+                                <span id="user-detail-peak-hour-badge" style="font-size: 11px; font-weight: 600; color: #818cf8; background: rgba(99,102,241,0.12); padding: 2px 8px; border-radius: 10px;">Peak: —</span>
+                            </div>
+                            <div id="user-detail-hourly-chart" class="global-chart-container" style="height: 240px;"></div>
+                        </div>
+
+                        <div class="global-chart-wrapper" style="padding: 20px; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                            <div class="global-chart-header" style="margin-bottom: 12px;">
+                                <h4 style="font-size: 14px; font-weight: 600; color: var(--text-title); margin: 0;">Operator Marketplace Share</h4>
+                            </div>
+                            <div id="user-detail-platform-donut" class="global-chart-container" style="height: 240px;"></div>
                         </div>
                     </div>
                 </div>
