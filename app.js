@@ -277,6 +277,15 @@ function loadSettings() {
         state.monthlySheetId = '13XegFLinVbeFDOElX7ShcuxGGy7If73jX79Bi2w0Dk4';
     }
 
+    const defaultWebhook = 'https://script.google.com/macros/s/AKfycbzgGibS6H2s0zVUmpn6KqJF-o2Nc4xO7yFKYCykJu6BYMuYze-bb4U4SkfctG96mbCW7Q/exec';
+    const savedWebhookUrl = localStorage.getItem('uploadWebhookUrl');
+    if (savedWebhookUrl) {
+        state.uploadWebhookUrl = savedWebhookUrl;
+    } else {
+        state.uploadWebhookUrl = defaultWebhook;
+        localStorage.setItem('uploadWebhookUrl', defaultWebhook);
+    }
+
     state.isDemoMode = false;
     state.activeMode = 'invoices';
     state.invoiceTabs = [];
@@ -422,6 +431,9 @@ function setupEventListeners() {
     document.getElementById('btn-close-settings').addEventListener('click', closeSettingsModal);
     document.getElementById('btn-cancel-settings').addEventListener('click', closeSettingsModal);
     
+    // Initialize Upload Data Module
+    initUploadModule();
+    
     // Modal Form Submit
     document.getElementById('settings-form').addEventListener('submit', handleSaveSettings);
     
@@ -432,6 +444,7 @@ function setupEventListeners() {
         const urlInput = document.getElementById('input-sheet-url');
         const returnUrlInput = document.getElementById('input-return-sheet-url');
         const monthlyUrlInput = document.getElementById('input-monthly-sheet-url');
+        const webhookInput = document.getElementById('input-webhook-url');
         const saveBtn = document.getElementById('btn-save-settings');
         const secureFields = document.getElementById('secure-settings-fields');
         
@@ -439,6 +452,7 @@ function setupEventListeners() {
             urlInput.disabled = false;
             returnUrlInput.disabled = false;
             monthlyUrlInput.disabled = false;
+            if (webhookInput) webhookInput.disabled = false;
             saveBtn.disabled = false;
             if (secureFields) secureFields.classList.remove('hidden'); // Show fields!
             feedback.textContent = '✓ Passcode verified. Editing unlocked!';
@@ -447,6 +461,7 @@ function setupEventListeners() {
             urlInput.disabled = true;
             returnUrlInput.disabled = true;
             monthlyUrlInput.disabled = true;
+            if (webhookInput) webhookInput.disabled = true;
             saveBtn.disabled = true;
             if (secureFields) secureFields.classList.add('hidden'); // Hide fields!
             if (passcode.length >= 4) {
@@ -632,11 +647,28 @@ function applyTheme() {
  */
 async function fetchTabNames(sheetId) {
     if (!sheetId) return null;
+
+    // Fast return for default known sheets (avoids unreliable external CORS proxies)
+    if (sheetId === '119tM2RQueW-6y-SvMaXUB2nbcztTldQnKrrucTbUI-k') {
+        return ['AMAZON', 'AJIO', 'MYNTRA', 'FLIPKART'];
+    }
+    if (sheetId === '1cMywn5iuMtaRXP9GlDgWP85-1HGdT6mPy4__DqRW0IQ') {
+        return ['AMAZON RETURN', 'AJIO RETURN', 'MYNTRA RETURN', 'FLIPKART RETURN'];
+    }
+    if (sheetId === '13XegFLinVbeFDOElX7ShcuxGGy7If73jX79Bi2w0Dk4') {
+        return ['ALL REPORT', 'MONTHLY DATA'];
+    }
+
     try {
         const targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`;
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
         
-        const response = await fetch(proxyUrl);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+        const response = await fetch(proxyUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
         if (!response.ok) throw new Error("CORS Proxy request failed");
         
         const contents = await response.text();
@@ -658,19 +690,9 @@ async function fetchTabNames(sheetId) {
             return tabNames;
         }
     } catch (error) {
-        console.error("Error auto-fetching tab names:", error);
+        // Fallback silently
     }
-    // Fallbacks
-    if (sheetId === '119tM2RQueW-6y-SvMaXUB2nbcztTldQnKrrucTbUI-k') {
-        return ['AMAZON', 'AJIO', 'MYNTRA', 'FLIPKART'];
-    }
-    if (sheetId === '1cMywn5iuMtaRXP9GlDgWP85-1HGdT6mPy4__DqRW0IQ') {
-        return ['AMAZON RETURN', 'AJIO RETURN', 'MYNTRA RETURN', 'FLIPKART RETURN'];
-    }
-    if (sheetId === '13XegFLinVbeFDOElX7ShcuxGGy7If73jX79Bi2w0Dk4') {
-        return ['ALL REPORT', 'MONTHLY DATA'];
-    }
-    return null;
+    return ['AMAZON', 'AJIO', 'MYNTRA', 'FLIPKART'];
 }
 
 /**
@@ -2028,6 +2050,12 @@ function openSettingsModal() {
     document.getElementById('input-return-sheet-url').value = state.returnSheetUrl || '';
     document.getElementById('input-monthly-sheet-url').value = state.monthlySheetUrl || '';
     
+    const webhookInput = document.getElementById('input-webhook-url');
+    if (webhookInput) {
+        webhookInput.value = localStorage.getItem('uploadWebhookUrl') || state.uploadWebhookUrl || 'https://script.google.com/macros/s/AKfycbzgGibS6H2s0zVUmpn6KqJF-o2Nc4xO7yFKYCykJu6BYMuYze-bb4U4SkfctG96mbCW7Q/exec';
+        webhookInput.disabled = true;
+    }
+    
     document.getElementById('input-sheet-url').disabled = true;
     document.getElementById('input-return-sheet-url').disabled = true;
     document.getElementById('input-monthly-sheet-url').disabled = true;
@@ -2058,6 +2086,14 @@ function handleSaveSettings(e) {
     localStorage.setItem('returnSheetUrl', returnUrl);
     localStorage.setItem('monthlySheetUrl', monthlyUrl);
     localStorage.removeItem('sheetTabs'); // Auto-detected tabs don't need manual saving
+
+    const webhookVal = document.getElementById('input-webhook-url')?.value.trim();
+    if (webhookVal !== undefined) {
+        localStorage.setItem('uploadWebhookUrl', webhookVal);
+    }
+    if (typeof updateUploadWebhookStatus === 'function') {
+        updateUploadWebhookStatus();
+    }
 
     state.sheetUrl = url;
     state.sheetId = extractSheetId(url);
@@ -6274,4 +6310,601 @@ function exportOperatorScorecard(userData, dailyEntries) {
     printWindow.document.write(scorecardHtml);
     printWindow.document.close();
 }
+
+/**
+ * =========================================================================
+ * UPLOAD SALES & PURCHASE DATA MODULE (GOOGLE SHEET SYNC)
+ * =========================================================================
+ * Processes 2 uploaded files (Sale Details & Purchase Details) and maps
+ * rows starting from Row 3 into Columns A to R:
+ *
+ * Col A: Sale Col G (index 6)
+ * Col B: Sale Col B (index 1)
+ * Col C: Sale Col C (index 2)
+ * Col D: Sale Col Y (index 24)
+ * Col E: Sale Col L (index 11)
+ * Col F: Sale Col U (index 20)
+ * Col G: Blank
+ * Col H: ★ (Star)
+ * Col I: Purchase Col F (index 5)
+ * Col J: Purchase Col B (index 1)
+ * Col K: Sale Col C (index 2)
+ * Col L: Purchase Col K (index 10)
+ * Col M: Purchase Col T (index 19)
+ * Col N: Blank
+ * Col O: Current Date-Time & User ("DD-MM-YYYY HH:MM:SS-USERNAME")
+ * Col P: "ALL CLEAR"
+ * Col Q: Purchase Col C (index 2)
+ * Col R: User Name
+ * =========================================================================
+ */
+
+const uploadState = {
+    saleRows: [],         // Raw 2D array from Sale file
+    purchaseRows: [],     // Raw 2D array from Purchase file
+    saleFileName: '',
+    purchaseFileName: '',
+    mergedRows: [],       // Processed array of 18-element rows
+    isUploading: false
+};
+
+function initUploadModule() {
+    const btnOpenUpload = document.getElementById('btn-open-upload');
+    const btnTableUpload = document.getElementById('btn-table-upload');
+    const btnCloseUpload = document.getElementById('btn-close-upload');
+    const btnCancelUpload = document.getElementById('btn-cancel-upload');
+    const uploadModal = document.getElementById('upload-modal');
+    const btnSubmitUpload = document.getElementById('btn-submit-upload');
+    const btnDownloadMerged = document.getElementById('btn-download-merged');
+    const btnTogglePreview = document.getElementById('btn-toggle-preview');
+
+    const usernameInput = document.getElementById('upload-username');
+    const btnGotoSettings = document.getElementById('btn-goto-settings');
+    const btnCopyScript = document.getElementById('btn-copy-script-code');
+
+    // Load saved settings from LocalStorage
+    if (usernameInput) {
+        const savedUser = localStorage.getItem('uploaderUserName') || '';
+        if (savedUser) usernameInput.value = savedUser;
+        usernameInput.addEventListener('input', (e) => {
+            const val = e.target.value.trim().toUpperCase();
+            localStorage.setItem('uploaderUserName', val);
+            if (uploadState.saleRows.length > 0 || uploadState.purchaseRows.length > 0) {
+                processMergedRows();
+                renderPreviewTable();
+            }
+        });
+    }
+
+    // Go to Settings button from Upload Modal
+    if (btnGotoSettings) {
+        btnGotoSettings.addEventListener('click', () => {
+            closeUploadModal();
+            openSettingsModal();
+        });
+    }
+
+    // Modal open / close
+    if (btnOpenUpload) btnOpenUpload.addEventListener('click', openUploadModal);
+    if (btnTableUpload) btnTableUpload.addEventListener('click', openUploadModal);
+    if (btnCloseUpload) btnCloseUpload.addEventListener('click', closeUploadModal);
+    if (btnCancelUpload) btnCancelUpload.addEventListener('click', closeUploadModal);
+
+    if (uploadModal) {
+        uploadModal.addEventListener('click', (e) => {
+            if (e.target.id === 'upload-modal') closeUploadModal();
+        });
+    }
+
+    // Copy Apps Script code (in Google Sheet Settings modal)
+    if (btnCopyScript) {
+        btnCopyScript.addEventListener('click', () => {
+            const codeEl = document.getElementById('script-code-text');
+            if (codeEl) {
+                navigator.clipboard.writeText(codeEl.innerText).then(() => {
+                    showToast('Apps Script code copied to clipboard!', 'success');
+                }).catch(() => {
+                    showToast('Failed to copy code. Please copy manually.', 'error');
+                });
+            }
+        });
+    }
+
+    // Setup Drag and Drop zones
+    setupDropZone('drop-zone-sale', 'file-sale-input', 'sale');
+    setupDropZone('drop-zone-purchase', 'file-purchase-input', 'purchase');
+
+    // Toggle Preview Table
+    if (btnTogglePreview) {
+        btnTogglePreview.addEventListener('click', () => {
+            const wrapper = document.getElementById('preview-table-wrapper');
+            if (!wrapper) return;
+            const isHidden = wrapper.classList.toggle('hidden');
+            if (!isHidden) {
+                renderPreviewTable();
+            }
+        });
+    }
+
+    // Download Merged File
+    if (btnDownloadMerged) {
+        btnDownloadMerged.addEventListener('click', handleDownloadMergedExcel);
+    }
+
+    // Submit Upload to Google Sheet
+    if (btnSubmitUpload) {
+        btnSubmitUpload.addEventListener('click', handleExecuteUpload);
+    }
+}
+
+function openUploadModal() {
+    const modal = document.getElementById('upload-modal');
+    if (!modal) return;
+    populateUploadChannels();
+    updateUploadWebhookStatus();
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+}
+
+function updateUploadWebhookStatus() {
+    const statusVal = document.getElementById('webhook-status-value');
+    if (!statusVal) return;
+    const url = localStorage.getItem('uploadWebhookUrl') || '';
+    if (url) {
+        statusVal.textContent = 'Configured & Ready';
+        statusVal.style.color = '#10b981';
+    } else {
+        statusVal.textContent = 'Not configured (Click Configure)';
+        statusVal.style.color = '#f59e0b';
+    }
+}
+
+function closeUploadModal() {
+    const modal = document.getElementById('upload-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+}
+
+function populateUploadChannels() {
+    const select = document.getElementById('upload-channel');
+    if (!select) return;
+
+    // Available tabs from state or defaults
+    let tabs = ['AJIO', 'AMAZON', 'MYNTRA', 'FLIPKART'];
+    if (state.invoiceTabs && Array.isArray(state.invoiceTabs) && state.invoiceTabs.length > 0) {
+        tabs = [...new Set([...state.invoiceTabs, ...tabs])];
+    }
+
+    select.innerHTML = '';
+    tabs.forEach(tab => {
+        const opt = document.createElement('option');
+        opt.value = tab;
+        opt.textContent = tab;
+        if (state.activeTab && state.activeTab.trim().toUpperCase() === tab.trim().toUpperCase()) {
+            opt.selected = true;
+        }
+        select.appendChild(opt);
+    });
+}
+
+function setupDropZone(dropZoneId, fileInputId, fileType) {
+    const dropZone = document.getElementById(dropZoneId);
+    const fileInput = document.getElementById(fileInputId);
+    if (!dropZone || !fileInput) return;
+
+    ['dragenter', 'dragover'].forEach(name => {
+        dropZone.addEventListener(name, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(name => {
+        dropZone.addEventListener(name, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFileSelect(e.dataTransfer.files[0], fileType, dropZone);
+        }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            handleFileSelect(e.target.files[0], fileType, dropZone);
+        }
+    });
+}
+
+async function handleFileSelect(file, fileType, dropZone) {
+    if (!file) return;
+
+    // Check extension
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+        showToast(`Unsupported file: .${ext}. Please upload .xlsx, .xls, or .csv`, 'error');
+        return;
+    }
+
+    showToast(`Parsing ${file.name}...`, 'info', 2000);
+
+    try {
+        const parsedRows = await parseSpreadsheetFile(file);
+        const validCount = getValidRowsFromThird(parsedRows).length;
+
+        if (fileType === 'sale') {
+            uploadState.saleRows = parsedRows;
+            uploadState.saleFileName = file.name;
+            const badge = document.getElementById('badge-sale-file');
+            if (badge) {
+                badge.innerHTML = `<i data-lucide="check-circle" style="width:12px;height:12px;"></i> ${file.name} (${validCount.toLocaleString()} rows)`;
+                badge.classList.remove('hidden');
+            }
+            dropZone.classList.add('has-file');
+        } else {
+            uploadState.purchaseRows = parsedRows;
+            uploadState.purchaseFileName = file.name;
+            const badge = document.getElementById('badge-purchase-file');
+            if (badge) {
+                badge.innerHTML = `<i data-lucide="check-circle" style="width:12px;height:12px;"></i> ${file.name} (${validCount.toLocaleString()} rows)`;
+                badge.classList.remove('hidden');
+            }
+            dropZone.classList.add('has-file');
+        }
+
+        if (window.lucide) lucide.createIcons();
+
+        updateUploadSummary();
+
+    } catch (err) {
+        console.error('File Parse Error:', err);
+        showToast(`Failed to parse ${file.name}: ${err.message}`, 'error');
+    }
+}
+
+function parseSpreadsheetFile(file) {
+    return new Promise((resolve, reject) => {
+        if (typeof XLSX === 'undefined') {
+            reject(new Error('SheetJS library is not loaded. Please refresh the page.'));
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {
+                    type: 'array',
+                    cellDates: true,
+                    dateNF: 'dd/mm/yyyy'
+                });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonRows = XLSX.utils.sheet_to_json(worksheet, {
+                    header: 1,
+                    raw: false,
+                    defval: ''
+                });
+                resolve(jsonRows);
+            } catch (err) {
+                reject(err);
+            }
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+function getValidRowsFromThird(rows) {
+    if (!rows || rows.length < 3) return [];
+    // Data starts at row 3 (0-based index 2)
+    const rawData = rows.slice(2);
+    // Exclude trailing completely blank rows
+    return rawData.filter(r => {
+        if (!r || !Array.isArray(r)) return false;
+        return r.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== '');
+    });
+}
+
+function updateUploadSummary() {
+    const saleData = getValidRowsFromThird(uploadState.saleRows);
+    const purchaseData = getValidRowsFromThird(uploadState.purchaseRows);
+
+    const summaryBox = document.getElementById('upload-summary-box');
+    const statSaleCount = document.getElementById('stat-sale-count');
+    const statPurchaseCount = document.getElementById('stat-purchase-count');
+    const statReadyCount = document.getElementById('stat-ready-count');
+    const btnSubmit = document.getElementById('btn-submit-upload');
+    const btnDownload = document.getElementById('btn-download-merged');
+
+    if (uploadState.saleRows.length > 0 || uploadState.purchaseRows.length > 0) {
+        if (summaryBox) summaryBox.classList.remove('hidden');
+    }
+
+    if (statSaleCount) statSaleCount.textContent = saleData.length.toLocaleString();
+    if (statPurchaseCount) statPurchaseCount.textContent = purchaseData.length.toLocaleString();
+
+    // Process merged records
+    processMergedRows();
+    const readyCount = uploadState.mergedRows.length;
+    if (statReadyCount) statReadyCount.textContent = readyCount.toLocaleString();
+
+    // Enable upload & download buttons if at least one file has records
+    const canUpload = (saleData.length > 0 && purchaseData.length > 0);
+    if (btnSubmit) btnSubmit.disabled = !canUpload;
+    if (btnDownload) btnDownload.disabled = (readyCount === 0);
+
+    // If preview wrapper is currently open, re-render it
+    const previewWrapper = document.getElementById('preview-table-wrapper');
+    if (previewWrapper && !previewWrapper.classList.contains('hidden')) {
+        renderPreviewTable();
+    }
+}
+
+function formatCellClean(val) {
+    if (val === null || val === undefined) return '';
+    if (val instanceof Date && !isNaN(val)) {
+        const d = String(val.getDate()).padStart(2, '0');
+        const m = String(val.getMonth() + 1).padStart(2, '0');
+        const y = val.getFullYear();
+        return `${d}/${m}/${y}`;
+    }
+    return String(val).trim();
+}
+
+function getFormattedDateTimeUser(userName) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dd = pad(now.getDate());
+    const mm = pad(now.getMonth() + 1);
+    const yyyy = now.getFullYear();
+    const hh = pad(now.getHours());
+    const min = pad(now.getMinutes());
+    const ss = pad(now.getSeconds());
+    const cleanUser = (userName || 'USER').trim().toUpperCase();
+    return `${dd}-${mm}-${yyyy} ${hh}:${min}:${ss}-${cleanUser}`;
+}
+
+function processMergedRows() {
+    const saleData = getValidRowsFromThird(uploadState.saleRows);
+    const purchaseData = getValidRowsFromThird(uploadState.purchaseRows);
+    const userNameInput = document.getElementById('upload-username');
+    const userName = (userNameInput ? userNameInput.value.trim().toUpperCase() : '') || 'USER';
+
+    const maxRows = Math.max(saleData.length, purchaseData.length);
+    if (maxRows === 0) {
+        uploadState.mergedRows = [];
+        return [];
+    }
+
+    const timestampUser = getFormattedDateTimeUser(userName);
+    const merged = [];
+
+    for (let i = 0; i < maxRows; i++) {
+        const sRow = saleData[i] || [];
+        const pRow = purchaseData[i] || [];
+
+        // Check if row has any content
+        const sHas = sRow.some(c => c && String(c).trim() !== '');
+        const pHas = pRow.some(c => c && String(c).trim() !== '');
+        if (!sHas && !pHas) continue;
+
+        // Exact 18-column mapping specified by user:
+        // Col A: Sale Col G (index 6)
+        // Col B: Sale Col B (index 1)
+        // Col C: Sale Col C (index 2)
+        // Col D: Sale Col Y (index 24)
+        // Col E: Sale Col L (index 11)
+        // Col F: Sale Col U (index 20)
+        // Col G: Blank
+        // Col H: ★ (Star)
+        // Col I: Purchase Col F (index 5)
+        // Col J: Purchase Col B (index 1)
+        // Col K: Sale Col C (index 2)
+        // Col L: Purchase Col K (index 10)
+        // Col M: Purchase Col T (index 19)
+        // Col N: Blank
+        // Col O: DD-MM-YYYY HH:MM:SS-USERNAME
+        // Col P: "ALL CLEAR"
+        // Col Q: Purchase Col C (index 2)
+        // Col R: USERNAME
+        const row = [
+            formatCellClean(sRow[6]),     // Col A: INVOICE ID
+            formatCellClean(sRow[1]),     // Col B: INVOICE NO.
+            formatCellClean(sRow[2]),     // Col C: INVOICE DATE
+            formatCellClean(sRow[24]),    // Col D: IRN DATE
+            formatCellClean(sRow[11]),    // Col E: QTY
+            formatCellClean(sRow[20]),    // Col F: SALE AMOUNT
+            "",                           // Col G: ZOHO SALE (Blank)
+            "★",                          // Col H: STAR
+            formatCellClean(pRow[5]),     // Col I: BILL ID
+            formatCellClean(pRow[1]),     // Col J: BILL NO.
+            formatCellClean(sRow[2]),     // Col K: BILL DATE (from Sale Col C)
+            formatCellClean(pRow[10]),    // Col L: QTY (2)
+            formatCellClean(pRow[19]),    // Col M: PURCHASE AMOUNT
+            "",                           // Col N: ZOHO PURCHASE (Blank)
+            timestampUser,                // Col O: DATA AND TIME
+            "ALL CLEAR",                  // Col P: REMARK
+            formatCellClean(pRow[2]),     // Col Q: VENDOR NAME
+            userName                      // Col R: USER
+        ];
+
+        merged.push(row);
+    }
+
+    uploadState.mergedRows = merged;
+    return merged;
+}
+
+function renderPreviewTable() {
+    const tbody = document.getElementById('preview-table-tbody');
+    if (!tbody) return;
+
+    processMergedRows();
+    const rows = uploadState.mergedRows;
+
+    if (!rows || rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="18" style="text-align: center; padding: 16px; color: var(--text-muted);">Please upload both Sale and Purchase files to preview mapped data.</td></tr>';
+        return;
+    }
+
+    // Render up to first 10 rows for preview
+    const previewList = rows.slice(0, 10);
+    tbody.innerHTML = previewList.map((row) => {
+        return `<tr>
+            ${row.map((cell, idx) => {
+                if (idx === 7) return `<td style="color: #f59e0b; text-align: center; font-weight: bold;">★</td>`;
+                if (idx === 15) return `<td><span class="badge success" style="font-size: 10px; padding: 2px 6px;">ALL CLEAR</span></td>`;
+                return `<td>${cell !== '' ? cell : '<span style="color:var(--text-muted);">-</span>'}</td>`;
+            }).join('')}
+        </tr>`;
+    }).join('');
+}
+
+function handleDownloadMergedExcel() {
+    processMergedRows();
+    if (!uploadState.mergedRows || uploadState.mergedRows.length === 0) {
+        showToast('No parsed data available to download.', 'error');
+        return;
+    }
+
+    const channelSelect = document.getElementById('upload-channel');
+    const channel = channelSelect ? channelSelect.value.trim() : 'AJIO';
+
+    const headers = [
+        'INVOICE ID', 'INVOICE NO.', 'INVOICE DATE', 'IRN DATE', 'QTY', 'SALE AMOUNT',
+        'ZOHO SALE', '★', 'BILL ID', 'BILL NO.', 'BILL DATE', 'QTY (2)',
+        'PURCHASE AMOUNT', 'ZOHO PURCHASE', 'DATA AND TIME', 'REMARK', 'VENDOR NAME', 'USER'
+    ];
+
+    const aoa = [headers, ...uploadState.mergedRows];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, channel);
+    XLSX.writeFile(wb, `${channel}_Upload_Data_${Date.now()}.xlsx`);
+
+    showToast(`Downloaded processed file with ${uploadState.mergedRows.length} rows!`, 'success');
+}
+
+async function handleExecuteUpload() {
+    const channelSelect = document.getElementById('upload-channel');
+    const userNameInput = document.getElementById('upload-username');
+    const uploadBtn = document.getElementById('btn-submit-upload');
+    const uploadText = document.getElementById('btn-upload-text');
+    const progressBar = document.getElementById('upload-progress-bar');
+    const progressContainer = document.getElementById('upload-progress-container');
+    const statusMsg = document.getElementById('upload-status-message');
+
+    const channel = channelSelect ? channelSelect.value.trim() : 'AJIO';
+    const userName = userNameInput ? userNameInput.value.trim().toUpperCase() : '';
+    const webhookUrl = localStorage.getItem('uploadWebhookUrl') || '';
+
+    if (!userName) {
+        showToast('Please enter your User Name before uploading.', 'error');
+        userNameInput?.focus();
+        return;
+    }
+
+    processMergedRows();
+
+    if (!uploadState.mergedRows || uploadState.mergedRows.length === 0) {
+        showToast('Please select both Sale Details and Purchase Details files first.', 'error');
+        return;
+    }
+
+    if (!webhookUrl) {
+        showToast('Please configure the Google Apps Script Webhook URL in Google Sheet Settings first.', 'error');
+        closeUploadModal();
+        openSettingsModal();
+        return;
+    }
+
+    // Save configurations
+    localStorage.setItem('uploaderUserName', userName);
+
+    uploadState.isUploading = true;
+    uploadBtn.disabled = true;
+    uploadText.textContent = `Uploading ${uploadState.mergedRows.length.toLocaleString()} rows...`;
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '30%';
+    statusMsg.style.display = 'block';
+    statusMsg.style.color = '#38bdf8';
+    statusMsg.textContent = `Connecting to Google Apps Script Webhook...`;
+
+    const payload = {
+        tabName: channel,
+        rows: uploadState.mergedRows
+    };
+
+    try {
+        progressBar.style.width = '60%';
+        statusMsg.textContent = `Appending ${uploadState.mergedRows.length.toLocaleString()} rows to Google Sheet [${channel}]...`;
+
+        await fetch(webhookUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: {
+                'Content-Type': 'text/plain;charset=utf-8'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        progressBar.style.width = '100%';
+        statusMsg.style.color = '#10b981';
+        statusMsg.textContent = `Success! ${uploadState.mergedRows.length.toLocaleString()} records uploaded to ${channel}.`;
+
+        showToast(`Success! ${uploadState.mergedRows.length.toLocaleString()} records uploaded to ${channel}.`, 'success');
+
+        setTimeout(() => {
+            closeUploadModal();
+            // Automatically refresh dashboard table
+            if (typeof fetchData === 'function') {
+                fetchData();
+            }
+        }, 1500);
+
+    } catch (err) {
+        console.error('Upload failed:', err);
+        statusMsg.style.color = '#ef4444';
+        statusMsg.textContent = `Upload failed: ${err.message}`;
+        showToast(`Upload failed: ${err.message}`, 'error');
+    } finally {
+        uploadState.isUploading = false;
+        uploadBtn.disabled = false;
+        uploadText.textContent = 'Upload to Google Sheet';
+        setTimeout(() => {
+            progressContainer.style.display = 'none';
+            progressBar.style.width = '0%';
+        }, 3000);
+    }
+}
+
+function showToast(message, type = 'info', duration = 4000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast-msg ${type}`;
+    let icon = 'info';
+    if (type === 'success') icon = 'check-circle-2';
+    if (type === 'error') icon = 'alert-triangle';
+
+    toast.innerHTML = `<i data-lucide="${icon}" style="width: 18px; height: 18px; flex-shrink: 0;"></i><span>${message}</span>`;
+    container.appendChild(toast);
+
+    if (window.lucide) lucide.createIcons();
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
 

@@ -13,6 +13,8 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- ApexCharts CDN -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <!-- SheetJS (XLSX / CSV parser) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -244,6 +246,11 @@
                         <i data-lucide="moon" class="moon-icon"></i>
                     </button>
                     
+                    <button class="primary-btn btn-upload-header" id="btn-open-upload" title="Upload Sales & Purchase Data">
+                        <i data-lucide="cloud-upload"></i>
+                        <span>Upload Data</span>
+                    </button>
+
                     <button class="primary-btn" id="btn-open-settings">
                         <i data-lucide="sliders"></i>
                         <span>Configure Sheet</span>
@@ -1082,6 +1089,10 @@
                                 <option value="100">100</option>
                             </select>
                         </div>
+                        <button id="btn-table-upload" class="table-upload-btn" title="Upload Sales & Purchase Data">
+                            <i data-lucide="cloud-upload" style="width: 14px; height: 14px;"></i>
+                            <span>Upload Data</span>
+                        </button>
                         <button id="btn-export">
                             <img src="icon-excel.png" alt="Excel" class="btn-icon-excel">
                             <span>Export CSV</span>
@@ -1137,6 +1148,172 @@
         </main>
     </div>
 
+    <!-- Upload Data Modal Backdrop -->
+    <div class="modal-backdrop hidden" id="upload-modal">
+        <div class="modal-card upload-modal-card">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i data-lucide="cloud-upload" style="color: #10b981;"></i>
+                    <div>
+                        <h2 style="margin: 0; font-size: 18px;">Upload Sales & Purchase Data</h2>
+                        <span style="font-size: 11px; color: var(--text-muted);">Sync directly to Google Sheet (Cols A-R)</span>
+                    </div>
+                </div>
+                <button class="close-modal-btn" id="btn-close-upload" type="button">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            
+            <div class="modal-body upload-modal-body">
+                <form id="upload-form" onsubmit="return false;">
+                    <!-- Channel & User Name Row -->
+                    <div class="upload-grid-2">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="upload-channel" style="display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="layers" style="width: 14px; height: 14px; color: var(--primary);"></i>
+                                <span>Select Channel / Tab <strong style="color: #ef4444;">*</strong></span>
+                            </label>
+                            <select id="upload-channel" required>
+                                <option value="AJIO">AJIO</option>
+                                <option value="AMAZON">AMAZON</option>
+                                <option value="MYNTRA">MYNTRA</option>
+                                <option value="FLIPKART">FLIPKART</option>
+                            </select>
+                            <span class="form-help">Choose which channel tab to append data into.</span>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="upload-username" style="display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="user" style="width: 14px; height: 14px; color: #10b981;"></i>
+                                <span>User Name <strong style="color: #ef4444;">*</strong></span>
+                            </label>
+                            <input type="text" id="upload-username" placeholder="e.g. NIK, GEETA" style="text-transform: uppercase;" required>
+                            <span class="form-help">Will be recorded in Columns O & R.</span>
+                        </div>
+                    </div>
+
+                    <!-- Dual File Upload Dropzones -->
+                    <div class="upload-grid-2" style="margin-top: 18px;">
+                        <!-- Sale Details File -->
+                        <div class="drop-zone" id="drop-zone-sale">
+                            <input type="file" id="file-sale-input" accept=".xlsx, .xls, .csv">
+                            <div class="drop-icon-wrapper">
+                                <i data-lucide="file-spreadsheet" style="width: 22px; height: 22px;"></i>
+                            </div>
+                            <div class="drop-title">1. Sale Details File</div>
+                            <div class="drop-sub">Drag & drop or browse (.xlsx, .csv)</div>
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">
+                                Extracts Cols <strong>G, B, C, Y, L, U</strong> from row 3
+                            </div>
+                            <div class="file-info-badge hidden" id="badge-sale-file"></div>
+                        </div>
+
+                        <!-- Purchase Details File -->
+                        <div class="drop-zone" id="drop-zone-purchase">
+                            <input type="file" id="file-purchase-input" accept=".xlsx, .xls, .csv">
+                            <div class="drop-icon-wrapper" style="background: rgba(6, 182, 212, 0.15); color: #06b6d4;">
+                                <i data-lucide="shopping-bag" style="width: 22px; height: 22px;"></i>
+                            </div>
+                            <div class="drop-title">2. Purchase Details File</div>
+                            <div class="drop-sub">Drag & drop or browse (.xlsx, .csv)</div>
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">
+                                Extracts Cols <strong>F, B, K, T, C</strong> from row 3
+                            </div>
+                            <div class="file-info-badge hidden" id="badge-purchase-file" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Summary & Validation Box -->
+                    <div class="upload-summary-box hidden" id="upload-summary-box">
+                        <div class="summary-stats">
+                            <div class="stat-pill">
+                                <span>Sale Rows:</span>
+                                <strong id="stat-sale-count">0</strong>
+                            </div>
+                            <div class="stat-pill">
+                                <span>Purchase Rows:</span>
+                                <strong id="stat-purchase-count">0</strong>
+                            </div>
+                            <div class="stat-pill" style="color: #10b981;">
+                                <span>Ready to Upload:</span>
+                                <strong id="stat-ready-count" style="color: #10b981;">0</strong>
+                            </div>
+                        </div>
+                        <button type="button" class="preview-toggle-btn" id="btn-toggle-preview">
+                            <i data-lucide="eye" style="width: 14px; height: 14px;"></i>
+                            <span>Preview Mapped Data</span>
+                        </button>
+                    </div>
+
+                    <!-- Preview Table (Initially Hidden) -->
+                    <div class="preview-table-wrapper hidden" id="preview-table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>A: INVOICE ID</th>
+                                    <th>B: INVOICE NO</th>
+                                    <th>C: INV DATE</th>
+                                    <th>D: IRN DATE</th>
+                                    <th>E: QTY</th>
+                                    <th>F: SALE AMT</th>
+                                    <th>G: ZOHO S</th>
+                                    <th>H: ★</th>
+                                    <th>I: BILL ID</th>
+                                    <th>J: BILL NO</th>
+                                    <th>K: BILL DATE</th>
+                                    <th>L: QTY(2)</th>
+                                    <th>M: PUR AMT</th>
+                                    <th>N: ZOHO P</th>
+                                    <th>O: DATE-TIME-USER</th>
+                                    <th>P: REMARK</th>
+                                    <th>Q: VENDOR</th>
+                                    <th>R: USER</th>
+                                </tr>
+                            </thead>
+                            <tbody id="preview-table-tbody">
+                                <!-- Populated Dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Google Apps Script Webhook Configuration Accordion -->
+                    <!-- Webhook Status Indicator -->
+                    <div id="upload-webhook-status" style="margin-top: 14px; padding: 10px 14px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="link-2" style="width: 15px; height: 15px; color: #10b981;"></i>
+                            <span id="webhook-status-label">Webhook URL: <span id="webhook-status-value" style="color: #10b981; font-weight: 500;">Connected</span></span>
+                        </div>
+                        <button type="button" id="btn-goto-settings" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-color); font-size: 11px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s;">
+                            Configure
+                        </button>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="upload-progress-container" id="upload-progress-container">
+                        <div class="upload-progress-bar" id="upload-progress-bar"></div>
+                    </div>
+                    
+                    <!-- Upload Status Text -->
+                    <div id="upload-status-message" style="margin-top: 8px; font-size: 12px; font-weight: 500; display: none;"></div>
+
+                    <div class="modal-footer" style="padding: 16px 0 0 0; border-top: 1px solid var(--border-color); margin-top: 16px;">
+                        <button type="button" class="secondary-btn" id="btn-cancel-upload">Cancel</button>
+                        <div class="footer-action-group">
+                            <button type="button" class="secondary-btn" id="btn-download-merged" disabled title="Download processed Excel file locally">
+                                <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+                                <span>Download File</span>
+                            </button>
+                            <button type="button" class="primary-btn btn-upload-header" id="btn-submit-upload" disabled>
+                                <i data-lucide="cloud-upload" style="width: 15px; height: 15px;"></i>
+                                <span id="btn-upload-text">Upload to Google Sheet</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Configure Sheet Modal Backdrop -->
     <div class="modal-backdrop hidden" id="settings-modal">
         <div class="modal-card">
@@ -1188,6 +1365,53 @@
                             <input type="text" id="input-sheet-tabs" readonly disabled value="Loading tabs automatically..." style="background-color: rgba(255,255,255,0.03); color: var(--text-muted); cursor: not-allowed;">
                             <span class="form-help">Tabs for the active database are auto-fetched dynamically.</span>
                         </div>
+
+                        <!-- Google Apps Script Webhook Section -->
+                        <div class="webhook-settings-card" style="margin-top: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; background: rgba(255, 255, 255, 0.02);">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                <i data-lucide="link-2" style="width: 16px; height: 16px; color: #10b981;"></i>
+                                <h3 style="font-size: 14px; font-weight: 600; margin: 0; color: var(--text-title);">Google Apps Script Webhook Settings</h3>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 12px;">
+                                <label for="input-webhook-url">Google Apps Script Web App URL</label>
+                                <input type="url" id="input-webhook-url" disabled value="https://script.google.com/macros/s/AKfycbzgGibS6H2s0zVUmpn6KqJF-o2Nc4xO7yFKYCykJu6BYMuYze-bb4U4SkfctG96mbCW7Q/exec" placeholder="https://script.google.com/macros/s/.../exec">
+                                <span class="form-help">Enter your deployed Google Apps Script Web App exec URL once. It is saved in your browser.</span>
+                            </div>
+
+                            <div style="font-size: 11px; color: var(--text-muted); line-height: 1.6; margin-bottom: 8px;">
+                                <strong style="color: var(--text-title);">1-Minute Setup Guide:</strong>
+                                <ol style="padding-left: 18px; margin: 6px 0;">
+                                    <li>Open your Google Sheet &gt; <strong>Extensions</strong> &gt; <strong>Apps Script</strong>.</li>
+                                    <li>Paste the code from <code style="color: #38bdf8;">GoogleAppsScript_Code.js</code> (or click Copy below).</li>
+                                    <li>Click <strong>Deploy &gt; New deployment &gt; Select type: Web app</strong>.</li>
+                                    <li>Set "Execute as: <strong>Me</strong>" and "Who has access: <strong>Anyone</strong>".</li>
+                                    <li>Click Deploy &amp; copy the generated URL here!</li>
+                                </ol>
+                            </div>
+
+                            <div class="script-code-box">
+                                <button type="button" class="copy-code-btn" id="btn-copy-script-code">
+                                    <i data-lucide="copy" style="width: 10px; height: 10px;"></i> Copy Code
+                                </button>
+                                <pre id="script-code-text" style="margin: 0; white-space: pre-wrap; font-family: inherit;">function doPost(e) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return ContentService.createTextOutput(JSON.stringify({status:"error",message:"Busy"}));
+  try {
+    var p = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(p.tabName) || ss.insertSheet(p.tabName);
+    var rows = p.rows;
+    if (rows && rows.length) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    }
+    return ContentService.createTextOutput(JSON.stringify({status:"success",count:rows.length}));
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({status:"error",message:err.toString()}));
+  } finally { lock.releaseLock(); }
+}</pre>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="modal-footer">
@@ -1201,6 +1425,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
 
     <!-- Main JS Application -->
     <script src="app.js"></script>
